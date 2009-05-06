@@ -1,0 +1,14 @@
+#paused {
+	font-size:12px;
+	color:#666666;
+	display:none;
+}
+#exposed_functions table td {
+	text-align:right;
+}
+#exposed_functions table td li {
+	direction: rtl;
+}
+#exposed_functions table td, #exposed_functions table th {
+	vertical-align:top;
+}

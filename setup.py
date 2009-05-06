@@ -1,0 +1,26 @@
+from ez_setup import use_setuptools
+use_setuptools()
+
+from setuptools import setup, find_packages
+setup(
+
+    name = "AWSpider",
+    version = "0.1",
+
+    packages = find_packages(),
+
+    install_requires = ['twisted>=8.1', 'genshi>=0.5.1'],
+    include_package_data = True,
+    package_data = {
+        'awspider': ['*.css', '*.js', '*.genshi'],
+    },
+
+    # metadata for upload to PyPI
+    author = "John Wehr",
+    author_email = "johnwehr@gmail.com",
+    description = "Amazon Web Services web crawler",
+    license = "MIT License",
+    keywords = "AWS amazon ec2 s3 simpledb twisted spider crawler",
+    url = "http://github.com/wehriam/awspider/"
+    
+)

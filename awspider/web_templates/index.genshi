@@ -1,0 +1,78 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+	  xmlns:xi="http://www.w3.org/2001/XInclude"
+	  xmlns:py="http://genshi.edgewall.org/">
+<xi:include href="layout.genshi" />
+<head>
+	<title>Home</title>
+	<script src="/static/js/index.js" type="text/javascript"></script>
+	<link rel="stylesheet" href="/static/css/index.css" type="text/css" />
+</head>
+<body>
+	<div class="span-24 last">
+		<h1>AWSpider <span id="paused">(paused)</span></h1>
+		<p id="running_time">The spider has been running for an unknown period of time.</p>
+	</div>
+	<div class="span-6">
+		<h2>System controls:</h2>
+		<form action="control/pause" method="get" id="form_pause">
+			<fieldset>
+				<input type="submit" value="Pause"/><br />
+				Indefinitely pauses the Spider's searches for reservations.
+			</fieldset>
+		</form>
+		<form action="control/resume" method="get" id="form_resume">
+			<fieldset>
+				<input type="submit" value="Resume"/><br />
+				Resumes the Spider's searches for reservations.
+			</fieldset>	
+		</form>
+		<form action="control/query" method="get" id="form_query">
+			<fieldset>
+				<input type="submit" value="Query"/><br />
+				Trigger the Spider to immediately query SimpleDB for new jobs.
+			</fieldset>
+		</form>
+		<form action="control/shutdown" method="get" id="form_shutdown">
+			<fieldset>
+				<input type="submit" value="Shut down"/><br />
+				Shuts down the Spider's process. The process cannot subsequently be resumed from the web interface.
+			</fieldset>
+		</form>
+	</div>	
+	<div class="span-6">
+		<h2>Exposed functions:</h2>
+		<div id="exposed_functions">
+		</div>
+	</div>
+	<div class="span-6">
+		<h2>Controls:</h2>
+		<h3>Delete reservation</h3>
+		<form action="control/delete_reservation" method="get" id="form_delete_reservation">
+			<fieldset>
+				<input type="text" name="uuid" />
+				<input type="submit" value="Delete " /><br />
+				Deletes a reservation by UUID.
+			</fieldset>
+		</form>
+		<h3>Delete function reservation</h3>
+		<form action="control/delete_function_reservations" method="get" id="form_delete_function_reservations">
+			<fieldset>
+				<input type="text" name="function_name" />
+				<input type="submit" value="Delete" /><br />
+				Deletes all reservations with the specified function name.
+			</fieldset>
+		</form>
+	</div>
+	<div class="span-6 last">
+		<h2>Data:</h2>
+		<h3>Show reservation</h3>
+		<form action="data/show_reservation" method="get" id="form_show_reservation">
+			<fieldset>
+				<input type="text" name="uuid" />
+				<input type="submit" value="Show" /><br />
+				Shows all stored data for a reservation by UUID.
+			</fieldset>
+		</form>
+	</div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+fieldset {
+	font-size:11px;
+	padding:0;
+	border:none;
+}
+
+select {
+	overflow:auto;
+	width:100%;
+}
+
+input.blur {
+	color:#999999;
+}

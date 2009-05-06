@@ -1,0 +1,13 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+	  xmlns:xi="http://www.w3.org/2001/XInclude"
+	  xmlns:py="http://genshi.edgewall.org/">
+<xi:include href="layout.genshi" />
+<head>
+	<title>Shut down</title>
+</head>
+<body>
+	<div class="span-24 last">
+		<h1>AWSpider has been shut down.</h1>
+	</div>
+</body>
+</html>
