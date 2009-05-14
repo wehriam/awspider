@@ -40,7 +40,9 @@ class TemplateResource(Resource):
             return content
         
         
-    def _render_template(self, template, data={}):
+    def _render_template(self, template, data=None):
+        if data is None:
+            data = {}
         t = self.loader.load( template )
-        return t.generate().render('xhtml', doctype='xhtml' )
+        return t.generate( data=data ).render('xhtml', doctype='xhtml')
 

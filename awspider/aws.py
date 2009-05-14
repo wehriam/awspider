@@ -16,12 +16,26 @@ import time
 import cStringIO
 import gzip as gzip_package
 
+import dateutil.parser
 
-def sdb_now_plus( i ):
-    return str(int(time.time() + i)).zfill(11)
+def sdb_now(offset=0):
+    return str(int(offset + time.time())).zfill(11)
+
+def sdb_now_add( i, offset=0 ):
+    return str(int(offset + time.time() + i) ).zfill(11)
+
+def sdb_parse_time(s, offset=0): # Parse a string into a SDB formatted timestamp
+    return str(int(offset + time.mktime(dateutil.parser.parse( s ).timetuple()))).zfill(11)
     
-def sdb_now():
-    return str(int(time.time())).zfill(11)
+
+    
+def sdb_latitude( latitude ):
+    adjusted = ( 90 + float( latitude ) ) * 100000
+    return str( int( adjusted ) ).zfill(8)
+
+def sdb_longitude( longitude ):
+    adjusted = ( 180 + float( longitude) ) * 100000
+    return str( int( adjusted ) ).zfill(8)
 
 class AmazonS3:
     

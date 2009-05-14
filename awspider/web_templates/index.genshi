@@ -32,6 +32,12 @@
 				Trigger the Spider to immediately query SimpleDB for new jobs.
 			</fieldset>
 		</form>
+		<form action="peer/check" method="get" id="form_check_peers">
+			<fieldset>
+				<input type="submit" value="Check peers"/><br />
+				Trigger the Spider to check and reload peers in five seconds.
+			</fieldset>
+		</form>
 		<form action="control/shutdown" method="get" id="form_shutdown">
 			<fieldset>
 				<input type="submit" value="Shut down"/><br />
@@ -47,7 +53,7 @@
 	<div class="span-6">
 		<h2>Controls:</h2>
 		<h3>Delete reservation</h3>
-		<form action="control/delete_reservation" method="get" id="form_delete_reservation">
+		<form action="data/delete_reservation" method="get" id="form_delete_reservation">
 			<fieldset>
 				<input type="text" name="uuid" />
 				<input type="submit" value="Delete " /><br />
@@ -55,7 +61,7 @@
 			</fieldset>
 		</form>
 		<h3>Delete function reservation</h3>
-		<form action="control/delete_function_reservations" method="get" id="form_delete_function_reservations">
+		<form action="data/delete_function_reservations" method="get" id="form_delete_function_reservations">
 			<fieldset>
 				<input type="text" name="function_name" />
 				<input type="submit" value="Delete" /><br />

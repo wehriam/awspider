@@ -1,5 +1,7 @@
+
 $(document).ready(function() { 
 	$('#form_query').ajaxForm({"dataType":"json"})
+	$('#form_check_peers').ajaxForm({"dataType":"json"})
 	$('#form_pause').ajaxForm({"dataType":"json", "success":form_pause_callback})
 	$('#form_resume').ajaxForm({"dataType":"json", "success":form_resume_callback})
 	$('#form_shutdown').ajaxForm({"dataType":"json", "success":form_shutdown_callback, "beforeSubmit":form_shutdown_beforesubmit})
@@ -8,21 +10,26 @@ $(document).ready(function() {
 	$('#form_delete_reservation input[type=text]').clearingInput({"text":"UUID"})
 	$('#form_delete_function_reservations input[type=text]').clearingInput({"text":"Function name"});
 	$('#form_show_reservation input[type=text]').clearingInput({"text":"UUID"});
+
 	jQuery.ajax({
 		"type": "GET",
-		"url": "data/server",
+		"url": "/data/server",
 		"data": {},
 		"dataType": "json",
 		"success":data_server_callback
 	})
 	jQuery.ajax({
 		"type": "GET",
-		"url": "data/exposed_function_details",
+		"url": "/data/exposed_function_details",
 		"data": {},
 		"dataType": "json",
 		"success":data_exposed_function_details_callback
-	})
+	})		
+
+
 })
+
+
 
 /*
 *

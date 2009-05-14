@@ -1,6 +1,6 @@
 from twisted.internet import reactor
 from twisted.internet import defer
-from twisted.web.client import getPage, HTTPClientFactory, HTTPDownloader, _parse
+from twisted.web.client import HTTPClientFactory, _parse
 from unicodeconverter import convertToUTF8, convertToUnicode
 import cPickle
 import sha
@@ -8,9 +8,10 @@ import time
 import dateutil.parser
 import datetime
 import pytz
+import urllib
 
 import logging
-logger = logging.getLogger("jasper")
+logger = logging.getLogger("main")
 
 class RequestQueuer():
 
@@ -95,13 +96,13 @@ class RequestQueuer():
 
         return deferred
 
-    def _getPage(self, url, method='GET', postdata=None, headers=None, agent="Offbeat Guides", timeout=60, cookies=None, followRedirect=1 ):
+    def _getPage(self, url, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1 ):
 
         if headers is None:
             headers = {}
 
         scheme, host, port, path = _parse(url)
-        
+
         factory = HTTPClientFactory(
             url, 
             method=method, 
@@ -116,9 +117,9 @@ class RequestQueuer():
         if scheme == 'https':
             from twisted.internet import ssl
             contextFactory = ssl.ClientContextFactory()
-            reactor.connectSSL(host, port, factory, contextFactory, timeout=60)
+            reactor.connectSSL(host, port, factory, contextFactory, timeout=timeout)
         else:
-            reactor.connectTCP(host, port, factory, timeout=60)
+            reactor.connectTCP(host, port, factory, timeout=timeout)
 
         factory.deferred.addCallback( self._getPageComplete, factory )
         factory.deferred.addErrback( self._getPageError, factory )
@@ -159,8 +160,19 @@ class PageGetter:
 
         if metadata is None:
             metadata = {}
-
-        if method != "GET":
+        
+        if isinstance( postdata, dict ):
+            for key in postdata:
+                postdata[key] = convertToUTF8( postdata[key] )
+            postdata = urllib.urlencode( postdata )
+        
+        if method.lower() == "post":
+            if headers is None:
+                headers = {"content-type":"application/x-www-form-urlencoded"}
+            else:
+                headers["content-type"] = "application/x-www-form-urlencoded"
+                
+        if method.lower() != "get":
             d = self.rq.getPage( url, method=method, postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, followRedirect=followRedirect, prioritize=prioritize )
             return d       
         

@@ -1,6 +1,6 @@
 from twisted.python.failure import Failure
 from twisted.web.resource import Resource
-from spider.aws import sdb_now
+from awspider.aws import sdb_now
 from uuid import uuid4
 import simplejson
 from twisted.web import server
@@ -17,7 +17,7 @@ class ExposedResource(Resource):
         self.function_name = function_name
         Resource.__init__(self)
     
-    def render_GET(self, request):
+    def render(self, request):
         request.setHeader('Content-type', 'text/javascript; charset=UTF-8')
         
         kwargs = {}

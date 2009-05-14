@@ -50,7 +50,25 @@ class DataResource(Resource):
                     return server.NOT_DONE_YET
                 else:
                     return self._errorResponse(Failure(exc_value=Exception("Parameter UUID is required.")))
-                                         
+            elif request.postpath[0] == "delete_reservation":
+                if "uuid" in request.args:
+                    d = self.spider.deleteReservation( request.args["uuid"][0] )
+                    d.addCallback( self._successResponse )
+                    d.addErrback( self._errorResponse )
+                    d.addCallback( self._immediateResponse, request )
+                    return server.NOT_DONE_YET
+                else:
+                    return self._errorResponse(Failure(exc_value=Exception("Parameter UUID is required.")))
+            elif request.postpath[0] == "delete_function_reservations": 
+                if "function_name" in request.args:
+                    d = self.spider.deleteFunctionReservations( request.args["function_name"][0] )
+                    d.addCallback( self._successResponse )
+                    d.addErrback( self._errorResponse )
+                    d.addCallback( self._immediateResponse, request )
+                    return server.NOT_DONE_YET           
+                else:
+                    return self._errorResponse(Failure(exc_value=Exception("Parameter function_name is required."))) 
+                                                            
     def _getCallback( self, data, uuids ):
         response = {}
         for i in range(0, len(uuids) ):

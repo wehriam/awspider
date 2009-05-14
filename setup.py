@@ -5,16 +5,13 @@ from setuptools import setup, find_packages
 setup(
 
     name = "AWSpider",
-    version = "0.1",
+    version = "0.1.4",
 
     packages = find_packages(),
 
     install_requires = ['twisted>=8.1', 'genshi>=0.5.1'],
     include_package_data = True,
-    package_data = {
-        'awspider': ['*.css', '*.js', '*.genshi'],
-    },
-
+    
     # metadata for upload to PyPI
     author = "John Wehr",
     author_email = "johnwehr@gmail.com",
