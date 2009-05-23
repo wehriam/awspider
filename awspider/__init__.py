@@ -56,20 +56,7 @@ from networkaddress import getNetworkAddress
 
 logger = logging.getLogger("main")
 
-def evaluateBoolean( b ):
-    if b == "false" or b == "False":
-        return False
-    elif b == "true" or b == "True":
-        return True
-    elif b == "no" or b == "No":
-        return False
-    elif b == "yes" or b == "Yes":
-        return True
-    else:
-        try:
-            return bool( int(b) )
-        except:
-            return False
+from .evaluateboolean import evaluateBoolean
 
 class AWSpider:
 
