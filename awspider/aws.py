@@ -26,7 +26,6 @@ def sdb_now_add( i, offset=0 ):
 
 def sdb_parse_time(s, offset=0): # Parse a string into a SDB formatted timestamp
     return str(int(offset + time.mktime(dateutil.parser.parse( s ).timetuple()))).zfill(11)
-    
 
     
 def sdb_latitude( latitude ):
@@ -48,35 +47,34 @@ class AmazonS3:
             self.rq = RequestQueuer()
         else:
             self.rq = rq
+            
+        self.rq.setHostMaxRequestsPerSecond( "s3.amazonaws.com", 0 )
+        self.rq.setHostMaxSimultaneousRequests( "s3.amazonaws.com", 0 )
         
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
     
-
-    
     def getBucket( self, bucket ):
         bucket = convertToUTF8( bucket )
-        host = "%s.s3.amazonaws.com" % bucket
         headers = {
-            "Host": host
+            "Host": "s3.amazonaws.com" 
         }
-        headers.update( self._getAuthorizationHeaders("GET", "", "", headers, "/" + bucket + "/") )
-        url = "http://%s/" % host
+        headers.update( self._getAuthorizationHeaders("GET", "", "", headers, "/" + bucket ) )
+        url = "http://s3.amazonaws.com/%s" % ( bucket )
         d = self.rq.getPage(url, method="GET", headers=headers )
-        
+    
         # Errback will try again a few times if it gets unusual (ie 503) errors.
         d.addErrback( self._genericErrback, url, method="GET", headers=headers )
-        return d          
+        return d        
 
     def putBucket( self, bucket ):
         bucket = convertToUTF8( bucket )
-        host = "%s.s3.amazonaws.com" % bucket
         headers = {
-            "Host": host,
+            "Host": "s3.amazonaws.com",
             "Content-Length": 0
         }
-        headers.update( self._getAuthorizationHeaders("PUT", "", "", headers, "/" + bucket + "/") )
-        url = "http://%s/" % host
+        headers.update( self._getAuthorizationHeaders("PUT", "", "", headers, "/" + bucket ) )
+        url = "http://s3.amazonaws.com/%s" % ( bucket )
         d = self.rq.getPage( url, method="PUT", headers=headers )
         
         # Errback will try again a few times if it gets unusual (ie 503) errors.
@@ -85,13 +83,12 @@ class AmazonS3:
 
     def deleteBucket( self, bucket ):
         bucket = convertToUTF8( bucket )
-        host = "%s.s3.amazonaws.com" % bucket
         headers = {
-            "Host": host,
+            "Host": "s3.amazonaws.com",
             "Content-Length": 0
         }
-        headers.update( self._getAuthorizationHeaders("DELETE", "", "", headers, "/" + bucket + "/") )
-        url = "http://%s/" % host
+        headers.update( self._getAuthorizationHeaders("DELETE", "", "", headers, "/" + bucket ) )
+        url = "http://s3.amazonaws.com/%s" % ( bucket )
         d = self.rq.getPage( url, method="DELETE", headers=headers )
 
         # Errback will try again a few times if it gets unusual (ie 503) errors.
@@ -103,12 +100,11 @@ class AmazonS3:
         bucket = convertToUTF8( bucket )
         key = convertToUTF8( key )
 
-        host = "%s.s3.amazonaws.com" % bucket
         headers = {
-            "Host": host
+            "Host": "s3.amazonaws.com"
         }
         headers.update( self._getAuthorizationHeaders("HEAD", "", "", headers, "/" + bucket + "/" + key ) )
-        url = "http://%s/%s" % (host, key)
+        url = "http://s3.amazonaws.com/%s/%s" % (bucket, key)
         d = self.rq.getPage(url, method="HEAD", headers=headers )
 
         # Errback will try again a few times if it gets unusual (ie 503) errors.
@@ -125,12 +121,11 @@ class AmazonS3:
         bucket = convertToUTF8( bucket )
         key = convertToUTF8( key )
         
-        host = "%s.s3.amazonaws.com" % bucket
         headers = {
-            "Host": host
+            "Host": "s3.amazonaws.com"
         }
         headers.update( self._getAuthorizationHeaders("GET", "", "", headers, "/" + bucket + "/" + key ) )
-        url = "http://%s/%s" % (host, key)
+        url = "http://s3.amazonaws.com/%s/%s" % (bucket, key)
         d = self.rq.getPage(url, method="GET", headers=headers )
 
         # Errback will try again a few times if it gets unusual (ie 503) errors.
@@ -158,8 +153,6 @@ class AmazonS3:
         bucket = convertToUTF8( bucket )
         key = convertToUTF8( key )
         
-        host = "%s.s3.amazonaws.com" % bucket
-        
         if headers is None:
             headers = {}
         
@@ -177,8 +170,11 @@ class AmazonS3:
         
         content_md5 = base64.encodestring( md5.new( data ).digest() ).strip()
         
-        headers['x-amz-acl'] = 'public-read'
-        
+        if public:
+            headers['x-amz-acl'] = 'public-read'
+        else:
+            headers['x-amz-acl'] = 'private'
+            
         #authorization_headers = self._getAuthorizationHeaders( 'PUT', content_md5, contentType, headers, "/" + bucket + "/" + key )
         generated_headers = { 'Content-Length': len( data ), 'Content-Type': contentType, 'Content-MD5': content_md5 }
         
@@ -187,7 +183,7 @@ class AmazonS3:
         
         headers.update( self._getAuthorizationHeaders("PUT", content_md5, contentType, headers, "/" + bucket + "/" + key ) )
         
-        url = "http://%s.s3.amazonaws.com/%s" % ( bucket, key )
+        url = "http://s3.amazonaws.com/%s/%s" % ( bucket, key )
 
         d = self.rq.getPage( url, method="PUT", headers=headers, postdata=data )
 
@@ -199,12 +195,11 @@ class AmazonS3:
         bucket = convertToUTF8( bucket )
         key = convertToUTF8( key )
 
-        host = "%s.s3.amazonaws.com" % bucket
         headers = {
-            "Host": host
+            "Host": "s3.amazonaws.com"
         }
         headers.update( self._getAuthorizationHeaders("DELETE", "", "", headers, "/" + bucket + "/" + key ) )
-        url = "http://%s/%s" % (host, key)
+        url = "http://s3.amazonaws.com/%s/%s" % (bucket, key)
         d = self.rq.getPage(url, method="DELETE", headers=headers )
 
         # Errback will try again a few times if it gets unusual (ie 503) errors.
@@ -265,6 +260,9 @@ class AmazonSDB:
             self.rq = RequestQueuer()
         else:
             self.rq = rq
+        
+        self.rq.setHostMaxRequestsPerSecond( "sdb.amazonaws.com", 0 )
+        self.rq.setHostMaxSimultaneousRequests( "sdb.amazonaws.com", 0 )
         
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key

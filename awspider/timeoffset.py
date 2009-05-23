@@ -5,13 +5,13 @@ from twisted.internet.defer import Deferred
 
 import datetime
 import time
+import calendar
 import random
 
 import logging
 logger = logging.getLogger("main")
 
-timeservers=["nist1.uccaribe.edu", "nist1-ny.WiTime.net", "time-a.nist.gov", "time-b.nist.gov", "nist1-dc.WiTime.net", "nist1.aol-va.symmetricom.com", "nist1.columbiacountyga.gov", "nist.expertsmi.com", "nist.netservicesgroup.com", "time-a.timefreq.bldrdoc.gov", "time-c.timefreq.bldrdoc.gov", "time.nist.gov", "utcnist.colorado.edu", "utcnist2.colorado.edu", "ntp-nist.ldsbc.edu", "time-nw.nist.gov", "nist1.aol-ca.symmetricom.com", "nist1.symmetricom.com", "nist1-sj.WiTime.net", "nist1-la.WiTime.net"]
-random.shuffle(timeservers)
+timeservers=["time.nist.gov", "time-a.nist.gov", "time-b.nist.gov", "time-nw.nist.gov", "nist1-ny.WiTime.net", "nist1-dc.WiTime.net", "nist1.aol-va.symmetricom.com", "nist1.columbiacountyga.gov", "nist.expertsmi.com", "nist.netservicesgroup.com", "time-a.timefreq.bldrdoc.gov", "time-c.timefreq.bldrdoc.gov", "utcnist.colorado.edu", "utcnist2.colorado.edu", "ntp-nist.ldsbc.edu", "nist1.aol-ca.symmetricom.com", "nist1.symmetricom.com", "nist1-sj.WiTime.net", "nist1-la.WiTime.net"]
 
 class SimpleTelnet(Telnet):
     
@@ -29,7 +29,7 @@ class SimpleTelnet(Telnet):
 def getTimeOffset():
     
     client = ClientCreator(reactor, SimpleTelnet)
-    server = timeservers.pop()
+    server = timeservers.pop(0)
     logger.debug( "Requesting time from %s." % server )
     d = client.connectTCP(server, 13, timeout=5)
     d.addCallback( _getTimeOffsetCallback, server )
@@ -55,7 +55,7 @@ def _getTimeOffsetCallback( simple_telnet, server ):
     return simple_telnet.deferred
     
 def _getTimeOffsetCallback2( data, server ):
-    
+
     logger.debug( "Got time from %s." % server )
 
     t = datetime.datetime( 
@@ -64,11 +64,21 @@ def _getTimeOffsetCallback2( data, server ):
         int(data[13:15]),
         int(data[16:18]),
         int(data[19:21]),
-        int(data[22:23]) )
-    
-    offset = time.mktime( t.timetuple() ) - time.time()
+        int(data[22:24]) )
+        
+    offset = calendar.timegm( t.timetuple() ) - time.time()
     return offset
 
+def getTimeOffsetTest():
+    d = getTimeOffset()
+    d.addCallback(_getTimeOffsetTestCallback)
+    
+def _getTimeOffsetTestCallback( offset ):
+    print offset
+    print time.time()
+    print time.time() + offset
+    reactor.stop()
+    
 if __name__ == "__main__":
     import logging.handlers
     handler = logging.StreamHandler()
@@ -76,5 +86,5 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
-    reactor.callWhenRunning( getTimeOffset )     
+    reactor.callWhenRunning( getTimeOffsetTest )     
     reactor.run()
