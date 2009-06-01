@@ -80,6 +80,12 @@ class AWSpider:
     peers = {}
     peer_uuids = []
     
+    queryloop = None
+    coordinateloop = None
+    
+    site_port = None
+    web_admin_site_port = None
+    
     def __init__( self, 
                 aws_access_key_id, 
                 aws_secret_access_key, 
@@ -139,11 +145,11 @@ class AWSpider:
         self.function_resource = Resource()
         self.resource.putChild( "function", self.function_resource )
         self.site = server.Site( self.resource )
-        reactor.listenTCP(self.port, self.site)
+        self.site_port = reactor.listenTCP(self.port, self.site)
 
         if web_admin and web_admin_port != self.port:
             self.web_admin_site = server.Site( self.resource )
-            reactor.listenTCP( web_admin_port, self.web_admin_site )
+            self.web_admin_site_port = reactor.listenTCP( web_admin_port, self.web_admin_site )
 
         self.s3 = AmazonS3( self.aws_access_key_id, self.aws_secret_access_key, self.rq )
         self.sdb = AmazonSDB( self.aws_access_key_id, self.aws_secret_access_key, self.rq )
@@ -763,6 +769,18 @@ class AWSpider:
     def _cleanupBeforeReactorShutdown( self ):
         logger.debug( "Cleaning up before reactor shutdown." )
         
+        if self.site is not None:
+            self.site_port.stopListening()
+        
+        if self.web_admin_site is not None:
+            self.web_admin_site_port.stopListening()
+            
+        if self.coordinateloop is not None:
+            self.coordinateloop.stop()
+
+        if self.queryloop is not None:
+            self.queryloop.stop()
+
         deferreds = []
         
         if self.aws_sdb_coordination_domain is not None:

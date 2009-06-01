@@ -1,7 +1,7 @@
 from twisted.internet import reactor
 from twisted.internet import defer
 from twisted.web.client import HTTPClientFactory, _parse
-from unicodeconverter import convertToUTF8, convertToUnicode
+from .unicodeconverter import convertToUTF8, convertToUnicode
 import cPickle
 import sha
 import time
@@ -52,7 +52,6 @@ class RequestQueuer():
         self.min_request_interval_per_domains = {}
         self.max_simultaneous_requests_per_domains = {}
         
-        task.LoopingCall( self.removeEmptyPendingHostLists ).start( 30 )
     
     def setHostMaxRequestsPerSecond( self, host, max_requests_per_second ):
         if max_requests_per_second == 0:
@@ -99,21 +98,25 @@ class RequestQueuer():
                 reactor.callLater( .1, self.checkActive)
                 return
         
-    def removeEmptyPendingHostLists( self ):
-        hosts_to_be_removed = filter( lambda host:len(self.pending_requests[host]) == 0, self.pending_requests.keys() )
-        for host in hosts_to_be_removed:
-            del self.pending_requests[host]
+#    def removeEmptyPendingHostLists( self ):
+#        hosts_to_be_removed = filter( lambda host:len(self.pending_requests[host]) == 0, self.pending_requests.keys() )
+#        for host in hosts_to_be_removed:
+#            del self.pending_requests[host]
         
     def requestComplete( self, response, deferred, host ):
         self.active_requests[ host ] -= 1
+        if host in self.pending_requests and len(self.pending_requests[host]) == 0:
+            del self.pending_requests[host]
         self.checkActive()
         deferred.callback( response )
         return None
 
     def requestError( self, error, deferred, host ):
         self.active_requests[ host ] -= 1
+        if host in self.pending_requests and len(self.pending_requests[host]) == 0:
+            del self.pending_requests[host]
         self.checkActive()
-        deferred.errback( error )  
+        deferred.errback( error )
         return None
     
     def getPage(self, url, last_modified=None, etag=None, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1, prioritize=False ):
@@ -177,13 +180,9 @@ class RequestQueuer():
         )
 
         if scheme == 'https':
-            try:
-                from twisted.internet import ssl
-                contextFactory = ssl.ClientContextFactory()
-                reactor.connectSSL(host, port, factory, contextFactory, timeout=timeout)
-            except Exception, e:
-                return Failure(exc_value=sys.exc_value, exc_type=sys.exc_type, exc_tb=sys.exc_traceback)
-
+            from twisted.internet import ssl
+            contextFactory = ssl.ClientContextFactory()
+            reactor.connectSSL(host, port, factory, contextFactory, timeout=timeout)
         else:
             reactor.connectTCP(host, port, factory, timeout=timeout)
 

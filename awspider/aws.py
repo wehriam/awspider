@@ -420,7 +420,6 @@ class AmazonSDB:
         return d
         
     def _getAttributesCallback( self, data ):
-        print data
         xml = ET.fromstring(data["response"])
         self.box_usage += float( xml.find(".//{http://sdb.amazonaws.com/doc/2007-11-07/}BoxUsage").text )
         
