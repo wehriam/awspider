@@ -98,11 +98,6 @@ class RequestQueuer():
                 reactor.callLater( .1, self.checkActive)
                 return
         
-#    def removeEmptyPendingHostLists( self ):
-#        hosts_to_be_removed = filter( lambda host:len(self.pending_requests[host]) == 0, self.pending_requests.keys() )
-#        for host in hosts_to_be_removed:
-#            del self.pending_requests[host]
-        
     def requestComplete( self, response, deferred, host ):
         self.active_requests[ host ] -= 1
         if host in self.pending_requests and len(self.pending_requests[host]) == 0:
