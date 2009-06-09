@@ -663,15 +663,7 @@ class AWSpider:
         
     def query( self ):
         
-        if len(self.functions) > 0:
-            reservation_function_names = []
-            for function_name in self.functions.keys():
-                 reservation_function_names.append( "reservation_function_name='%s'" % function_name )
-            reservation_function_names =  "INTERSECTION " + " OR ".join( reservation_function_names )
-        else:
-            reservation_function_names = ""
-        
-        sql = "SELECT * FROM `%s` WHERE reservation_next_request < '%s' INTERSECTION reservation_error != '1' %s" % ( self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset), reservation_function_names )
+        sql = "SELECT * FROM `%s` WHERE reservation_next_request < '%s' INTERSECTION reservation_error != '1'" % ( self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset) )
         
         #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         
@@ -701,6 +693,11 @@ class AWSpider:
                 continue
 
             function_name = reserved_arguments["reservation_function_name"]
+
+            if function_name not in self.functions:
+                logger.error( "Unable to process function %s for UUID: %s" % (function_name, uuid) )
+                # self.deleteReservation( uuid, function_name=function_name )
+                continue
 
             if "reservation_created" not in reserved_arguments:
                 logger.error( "Reservation %s, %s does not have a created time." % (function_name, uuid) )
@@ -957,9 +954,13 @@ class AWSpider:
             if "local_ip" in self.peers[uuid]:
                 self.peers[uuid]["uri"] = "http://%s:%s" % (self.peers[uuid]["local_ip"], self.peers[uuid]["port"] )
                 self.peers[uuid]["active"] = True
+                self.rq.setHostMaxRequestsPerSecond(self.peers[uuid]["local_ip"], 0)
+                self.rq.setHostMaxSimultaneousRequests(self.peers[uuid]["local_ip"], 0)
             elif "public_ip" in self.peers[uuid]:
                 self.peers[uuid]["uri"] = "http://%s:%s" % (self.peers[uuid]["public_ip"], self.peers[uuid]["port"] )
                 self.peers[uuid]["active"] = True
+                self.rq.setHostMaxRequestsPerSecond(self.peers[uuid]["public_ip"], 0)
+                self.rq.setHostMaxSimultaneousRequests(self.peers[uuid]["public_ip"], 0)
             else:
                 logger.error("Peer %s has no local or public IP. This should not happen." % uuid )
         
