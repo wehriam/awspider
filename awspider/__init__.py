@@ -1,6 +1,4 @@
 # To do:
-# Hammering prevention
-#  - Request trading
 # Negative cache
 # Max-age cache
 # Remove dateutil/req from pagegetter
@@ -50,11 +48,12 @@ PrettyPrinter = pprint.PrettyPrinter(indent=4)
 
 import logging
 import logging.handlers
+logger = logging.getLogger("main")
 
 from timeoffset import getTimeOffset
 from networkaddress import getNetworkAddress
 
-logger = logging.getLogger("main")
+
 
 from .evaluateboolean import evaluateBoolean
 
@@ -63,6 +62,8 @@ class AWSpider:
     """
     Amazon S3, Amazon EC2 based web spider.
     """
+    
+    start_deferred = None
     
     paused = False
     plugins = []
@@ -83,8 +84,14 @@ class AWSpider:
     queryloop = None
     coordinateloop = None
     
+    site = None
+    web_admin_site = None
     site_port = None
     web_admin_site_port = None
+    
+    shutdown_trigger_id = None
+    
+    logging_handler = None
     
     def __init__( self, 
                 aws_access_key_id, 
@@ -105,6 +112,8 @@ class AWSpider:
                 peer_check_interval=5,
                 reservation_check_interval=5,
                 hammer_prevention=True ):
+        
+        self.start_deferred = Deferred()
         
         self.hammer_prevention = hammer_prevention
         
@@ -157,13 +166,13 @@ class AWSpider:
         self.pg = PageGetter( self.s3, self.aws_s3_cache_bucket, rq=self.rq )
 
         if log_directory is None:
-            handler = logging.StreamHandler()
+            self.logging_handler = logging.StreamHandler()
         else:
-            handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_directory, 'spider.log'), when='D', interval=1)
+            self.logging_handler = logging.handlers.TimedRotatingFileHandler(os.path.join(log_directory, 'spider.log'), when='D', interval=1)
             
         formatter = logging.Formatter("%(levelname)s: %(message)s %(pathname)s:%(lineno)d")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        self.logging_handler.setFormatter(formatter)
+        logger.addHandler(self.logging_handler)
         
         log_level = log_level.lower()
         log_levels = {
@@ -180,6 +189,11 @@ class AWSpider:
     
         logger.info("Successfully loaded the Spider's configuration.")
 
+    def clearStorage( self ):
+        if self.aws_s3_storage_bucket is not None:
+            return self.s3.emptyBucket( self.aws_s3_storage_bucket )
+        raise Exception("aws_s3_storage_bucket is not defined.")
+        
     def showReservation( self, uuid ):
         d = self.sdb.getAttributes( self.aws_sdb_reservation_domain, uuid )
         return d
@@ -440,6 +454,7 @@ class AWSpider:
         
     def start( self ):
         reactor.callWhenRunning( self._start )
+        return self.start_deferred
         
     def _start( self ):
         logger.critical( "Checking S3 and SimpleDB setup, getting time offset for sync." )
@@ -466,16 +481,36 @@ class AWSpider:
         d.addCallback( self._startCallback )
 
     def _startCallback( self, data ):   
-        reactor.addSystemEventTrigger('before', 'shutdown', self._cleanupBeforeReactorShutdown)     
+        
+        for row in data:
+            if row[0] == False:
+                d = self.shutdown()
+                d.addCallback( self._startHandleError, error )
+                return d
+        
+        self.shutdown_trigger_id = reactor.addSystemEventTrigger('before', 'shutdown', self.shutdown )  
+        
         logger.critical( "Starting Spider UUID: %s" % self.uuid)
         self.queryloop = task.LoopingCall( self.query )
         self.queryloop.start( self.reservation_check_interval )
         if self.aws_sdb_coordination_domain is not None:
             self.coordinateloop = task.LoopingCall( self.coordinate )
             self.coordinateloop.start( self.peer_check_interval )  
-            reactor.callLater( 10, self.peerCheckRequest )          
-        #self.paused = True
-        pass
+            d = self.peerCheckRequest()
+            if isinstance( d, Deferred ):
+                d.addCallback( self._startCallback2 )
+                return d
+               
+        self._startCallback2( None )
+        
+    def _startCallback2( self, data ):
+        self.start_deferred.callback( True )
+        
+    def _startErrback( self, error ):
+        return self._startHandleError( None, error )
+    
+    def _startHandleError( self, data, error ):
+        self.start_deferred.errback( error )
    
     def getNetworkAddress( self ):
         d = getNetworkAddress()
@@ -493,8 +528,9 @@ class AWSpider:
             self.network_information["local_ip"] = self.local_ip
          
     def _getNetworkAddressErrback( self, error ):
-        logger.critical( "Could not get network address." )
-        self.shutdown()
+        message = "Could not get network address." 
+        logger.critical( message )
+        raise Exception( message )
             
     def getTimeOffset( self ):
         d = getTimeOffset()
@@ -508,8 +544,9 @@ class AWSpider:
     
     def _getTimeOffsetErrback( self, error ):
         if self.time_offset is None:
-            logger.critical( "Could not get time offset for sync." )
-            self.shutdown()
+            message = "Could not get time offset for sync."
+            logger.critical( message )
+            raise Exception( message )
     
     def _checkAndCreateS3Bucket( self, bucket_name ):
         d = self.s3.getBucket( bucket_name )
@@ -522,13 +559,15 @@ class AWSpider:
             d = self.s3.putBucket( bucket_name )
             d.addErrback( self._checkAndCreateS3BucketErrback2, bucket_name )
             return d
-            
-        logger.critical( "Could not find or create S3 bucket '%s'." % bucket_name )
-        self.shutdown()
+        
+        message = "Could not find or create S3 bucket '%s'." % bucket_name
+        logger.critical( message )
+        raise Exception( message )
         
     def _checkAndCreateS3BucketErrback2( self, error, bucket_name ):
-        logger.critical( "Could not create S3 bucket '%s'" % bucket_name )
-        self.shutdown()
+        message = "Could not create S3 bucket '%s'" % bucket_name
+        logger.critical( message )
+        raise Exception( message )
 
     def _checkAndCreateSDBDomain( self, domain_name ):    
         d = self.sdb.domainMetadata( domain_name )
@@ -542,13 +581,15 @@ class AWSpider:
             d = self.sdb.createDomain( domain_name  )
             d.addErrback( self._checkAndCreateSDBDomainErrback2, domain_name )
             return d
-        
-        logger.critical( "Could not find or create SDB domain '%s'." % domain_name )
-        self.shutdown()
+            
+        message = "Could not find or create SDB domain '%s'." % domain_name
+        logger.critical( message )
+        raise Exception( message )
         
     def _checkAndCreateSDBDomainErrback2( self, error, domain_name ):
-        logger.critical( "Could not create SDB domain '%s'" % domain_name )
-        self.shutdown()
+        message =  "Could not create SDB domain '%s'" % domain_name
+        logger.critical( message )
+        raise Exception( message )
     
     def pause(self):
         logger.critical( "Pausing Spider." )
@@ -578,7 +619,7 @@ class AWSpider:
     
     def deleteFunctionReservations( self, function_name ):
         logger.info( "Deleting reservations for function %s." % (function_name) )
-        d = self.sdb.select( "SELECT itemName() FROM %s WHERE reservation_function_name='%s'" % ( self.aws_sdb_reservation_domain, function_name) )
+        d = self.sdb.select( "SELECT itemName() FROM `%s` WHERE reservation_function_name='%s'" % ( self.aws_sdb_reservation_domain, function_name) )
         d.addCallback( self._deleteFunctionReservationsCallback, function_name )
         d.addErrback( self._deleteFunctionReservationsErrback, function_name )
         return d
@@ -630,7 +671,7 @@ class AWSpider:
         else:
             reservation_function_names = ""
         
-        sql = "SELECT * FROM %s WHERE reservation_next_request < '%s' INTERSECTION reservation_error != '1' %s" % ( self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset), reservation_function_names )
+        sql = "SELECT * FROM `%s` WHERE reservation_next_request < '%s' INTERSECTION reservation_error != '1' %s" % ( self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset), reservation_function_names )
         
         #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         
@@ -703,7 +744,7 @@ class AWSpider:
                 self.setReservationError( uuid )
                 continue
             
-            reactor.callInThread(self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
+            reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
 
     def callExposedFunction( self, func, kwargs, function_name, uuid ):
         
@@ -765,34 +806,76 @@ class AWSpider:
     def _exposedFunctionErrback2( self, error, function_name, uuid ):
         logger.error( "Could not put results of %s, %s on S3.\n%s" % (function_name, uuid, error) )
 
-    
-    def _cleanupBeforeReactorShutdown( self ):
-        logger.debug( "Cleaning up before reactor shutdown." )
+    def shutdown( self ):
         
-        if self.site is not None:
-            self.site_port.stopListening()
+        logger.debug( "Cleaning up before shutdown." )
         
-        if self.web_admin_site is not None:
-            self.web_admin_site_port.stopListening()
-            
-        if self.coordinateloop is not None:
-            self.coordinateloop.stop()
-
-        if self.queryloop is not None:
-            self.queryloop.stop()
-
+        if self.shutdown_trigger_id is not None:        
+            reactor.removeSystemEventTrigger( self.shutdown_trigger_id )
+        
         deferreds = []
         
+        if self.site is not None:
+            logger.debug( "Stopping listening on main HTTP interface." )
+            d = self.site_port.stopListening()
+            if isinstance(d, Deferred):
+                deferreds.append( d )
+        
+        if self.web_admin_site is not None:
+            logger.debug( "Stopping listening on web admin interface." )
+            d = self.web_admin_site_port.stopListening()
+            if isinstance(d, Deferred):
+                deferreds.append( d )
+                
+        if self.coordinateloop is not None:
+            logger.debug( "Stopping coordinating loop." )
+            d = self.coordinateloop.stop()
+            if isinstance(d, Deferred):
+                deferreds.append( d )
+                
+        if self.queryloop is not None:
+            logger.debug( "Stopping query loop." )
+            d = self.queryloop.stop()
+            if isinstance(d, Deferred):
+                deferreds.append( d )
+                
         if self.aws_sdb_coordination_domain is not None:
+            logger.debug( "Removing data from SDB coordination domain." )
             d = self.sdb.delete( self.aws_sdb_coordination_domain, self.uuid )
-            d.addCallback( self._cleanupBeforeReactorShutdownCallback )
+            d.addCallback(self._cleanupBeforeShutdown)
+            d.addCallback(self.peerCheckRequest)
+            deferreds.append( d )
+        
+        if len( deferreds ) > 0:
+            logger.debug( "Combinining deferred shutdown processes." )
+            d = DeferredList( deferreds )
+            d.addCallback( self._shutdownCallback )
             return d
+        else:
+            logger.debug( "No deferred processes." )
+            return self._shutdownCallback( None )
     
-    def _cleanupBeforeReactorShutdownCallback( self, data  ):
+    def _shutdownCallback( self, data ):
+        logger.debug( "Waiting for shutdown." )
+        d = Deferred()
+        reactor.callLater( 0, self._waitForShutdown, d )
+        return d
+        
+    def _waitForShutdown( self, shutdown_deferred ):          
+        if self.rq.pending > 0 or self.rq.active > 0:
+            logger.debug( "Waiting for shutdown." )
+            reactor.callLater( .1, self._waitForShutdown, shutdown_deferred )
+            return
+        logger.debug( "AWSpider shut down." )
+        
+        logger.removeHandler(self.logging_handler)
+            
+        shutdown_deferred.callback( True )
+        
+    def _cleanupBeforeShutdown(self, data):
         logger.debug( "Deleted uuid from %s" % self.aws_sdb_coordination_domain )
-        return self.peerCheckRequest()
     
-    def peerCheckRequest( self ):
+    def peerCheckRequest(self, data=None):
 
         logger.debug( "Signaling peers." )
 
@@ -801,35 +884,35 @@ class AWSpider:
         for uuid in self.peers:
             if uuid != self.uuid:
                 logger.debug( "Signaling %s to check peers." % self.peers[uuid]["uri"] )
-                d = self.pg.getPage( self.peers[uuid]["uri"] + "/peer/check", cache=-1 )
+                d = self.rq.getPage( self.peers[uuid]["uri"] + "/peer/check" )
                 d.addCallback( self._peerCheckRequestCallback, self.peers[uuid]["uri"] )
                 deferreds.append( d )
 
         if len(deferreds) > 0:
+            logger.debug( "Combinining shutdown signal deferreds." )
             return DeferredList(deferreds)
+        
+        return True
 
     def _peerCheckRequestCallback( self, data, uri ):
         logger.debug( "Got %s/peer/check." % uri )
-    
-    def shutdown( self ):
-        logger.critical( "Stopping server." )
-        reactor.callLater( 1, reactor.stop )
-    
+        
     def coordinate( self ):
-        #logger.debug( "Peers: %s" % self.peers )
+
         attributes = { "created":sdb_now(offset=self.time_offset) }
         attributes.update( self.network_information )
-        self.sdb.putAttributes( self.aws_sdb_coordination_domain, self.uuid, attributes, replace=attributes.keys() )
-        reactor.callLater( 5, self.checkPeers )
-    
-    def checkPeers( self ):
-        sql = "SELECT public_ip, local_ip, port FROM %s WHERE created > '%s'" % ( self.aws_sdb_coordination_domain, sdb_now_add( self.peer_check_interval * -2, offset=self.time_offset) )
+        d = self.sdb.putAttributes( self.aws_sdb_coordination_domain, self.uuid, attributes, replace=attributes.keys() )
+        d.addCallback( self._coordinateCallback )
+        d.addErrback( self._coordinateErrback )
+        
+    def _coordinateCallback( self, data ):
+        sql = "SELECT public_ip, local_ip, port FROM `%s` WHERE created > '%s'" % ( self.aws_sdb_coordination_domain, sdb_now_add( self.peer_check_interval * -2, offset=self.time_offset) )
         #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         d = self.sdb.select( sql )
-        d.addCallback( self._checkPeersCallback )
-        d.addErrback( self._checkPeersErrback )
+        d.addCallback( self._coordinateCallback2 )
+        d.addErrback( self._coordinateErrback )
         
-    def _checkPeersCallback( self, discovered ):
+    def _coordinateCallback2( self, discovered ):
 
         existing_peers = set( self.peers.keys() )
         discovered_peers = set( discovered.keys() )
@@ -858,15 +941,15 @@ class AWSpider:
         if len( new_peers ) > 0:
             if len(deferreds) > 0:
                 d = DeferredList(deferreds, consumeErrors=True)
-                d.addCallback( self._checkPeersCallback2 )
+                d.addCallback( self._coordinateCallback3 )
             else:
-                self._checkPeersCallback2( None ) #Just found ourself.
+                self._coordinateCallback3( None ) #Just found ourself.
         elif len( old_peers ) > 0:
-            self._checkPeersCallback2( None )
+            self._coordinateCallback3( None )
         else:
             pass # No old, no new.
         
-    def _checkPeersCallback2( self, data ):
+    def _coordinateCallback3( self, data ):
         
         logger.debug( "Re-organizing peers." )
         
@@ -883,12 +966,12 @@ class AWSpider:
         self.peer_uuids = self.peers.keys()
         self.peer_uuids.sort()
         
-#        print self.peers 
         logger.debug( "Peers updated to: %s" % self.peers )
         # Go through the peers and reorganize the group.
         pass
         
-    def _checkPeersErrback( self, error ):
+    def _coordinateErrback( self, error ):
+        
         logger.error( "Could not query SimpleDB for peers: %s" % str(error) )
 
     def verifyPeer( self, uuid, peer ):

@@ -1,6 +1,6 @@
 
 pep8="python pep8.py";
-pylint="/opt/local/Library/Frameworks/Python.framework/Versions/2.6/bin/pylint --method-rgx=[a-z_][A-Za-z0-9_]{2,30}$ --disable-msg=C0111 --good-names=d";
+pylint="/opt/local/Library/Frameworks/Python.framework/Versions/2.6/bin/pylint --method-rgx=[a-z_][A-Za-z0-9_]{2,60}$ --disable-msg=C0111 --good-names=d";
 
 rm -rf pylint
 rm -rf pep8

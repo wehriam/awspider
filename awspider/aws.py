@@ -1,3 +1,4 @@
+from twisted.internet.defer import DeferredList
 
 from unicodeconverter import convertToUTF8
 from pagegetter import RequestQueuer
@@ -36,6 +37,9 @@ def sdb_longitude( longitude ):
     adjusted = ( 180 + float( longitude) ) * 100000
     return str( int( adjusted ) ).zfill(8)
 
+S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
+SDB_NAMESPACE = "{http://sdb.amazonaws.com/doc/2007-11-07/}"
+
 class AmazonS3:
     
     ACCEPTABLE_ERROR_CODES = [400, 403, 404, 409]
@@ -48,11 +52,45 @@ class AmazonS3:
         else:
             self.rq = rq
             
-        self.rq.setHostMaxRequestsPerSecond( "s3.amazonaws.com", 0 )
-        self.rq.setHostMaxSimultaneousRequests( "s3.amazonaws.com", 0 )
+        self.rq.setHostMaxRequestsPerSecond("s3.amazonaws.com", 0)
+        self.rq.setHostMaxSimultaneousRequests("s3.amazonaws.com", 0)
         
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
+    
+    def emptyBucket(self, bucket):
+        d = self.getBucket( bucket )
+        d.addCallback( self._emptyBucketCallback, bucket )
+        return d
+        
+    def _emptyBucketCallback(self, result, bucket):
+        
+        xml = ET.XML(result["response"])
+
+        key_nodes = xml.findall(".//%sKey" % S3_NAMESPACE)
+
+        delete_deferreds = []
+        
+        for node in key_nodes:
+            delete_deferreds.append(self.deleteObject(bucket, node.text))
+
+        if len(delete_deferreds) == 0:
+            return True
+
+        d = DeferredList(delete_deferreds)
+
+        if xml.find('.//%sIsTruncated' % S3_NAMESPACE).text == "false":
+            d.addCallback(self._emptyBucketCallback2)
+        else:
+            d.addCallback(self._emptyBucketCallbackRepeat, bucket)
+
+        return d
+    
+    def _emptyBucketCallbackRepeat( self, data, bucket ):
+        return self.emptyBucket(bucket)
+    
+    def _emptyBucketCallback2( self, result ):
+        return True
     
     def getBucket( self, bucket ):
         bucket = convertToUTF8( bucket )

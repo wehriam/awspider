@@ -69,22 +69,3 @@ def _getTimeOffsetCallback2( data, server ):
     offset = calendar.timegm( t.timetuple() ) - time.time()
     return offset
 
-def getTimeOffsetTest():
-    d = getTimeOffset()
-    d.addCallback(_getTimeOffsetTestCallback)
-    
-def _getTimeOffsetTestCallback( offset ):
-    print offset
-    print time.time()
-    print time.time() + offset
-    reactor.stop()
-    
-if __name__ == "__main__":
-    import logging.handlers
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(levelname)s: %(message)s %(pathname)s:%(lineno)d")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-    reactor.callWhenRunning( getTimeOffsetTest )     
-    reactor.run()

@@ -44,7 +44,12 @@ class NetworkAddressGetter():
         random.shuffle(self.ip_functions)
     
     def __call__( self ):
-        
+        d = self.getAmazonIPs()
+        d.addCallback( self._getAmazonIPsCallback )
+        d.addErrback( self.getPublicIP )
+        return d
+    
+    def getAmazonIPs( self ):
         logger.debug( "Getting local IP from Amazon." )
         a = getPage( "http://169.254.169.254/2009-04-04/meta-data/local-ipv4", timeout=5 )
 
@@ -52,10 +57,9 @@ class NetworkAddressGetter():
         b = getPage( "http://169.254.169.254/2009-04-04/meta-data/public-ipv4", timeout=5  )
         
         d = DeferredList([a,b], consumeErrors=True)
-        d.addCallback( self._getNetworkAddressCallback )
         return d
     
-    def _getNetworkAddressCallback( self, data ):
+    def _getAmazonIPsCallback( self, data ):
         
         if data[0][0] == True:
             self.local_ip = data[0][1]
@@ -76,7 +80,8 @@ class NetworkAddressGetter():
             
         else:
             logger.debug( "Could not get public IP from Amazon." )
-            return self.getPublicIP()
+            raise Exception( "Could not get public IP from Amazon." )
+            
         
     def getPublicIP( self, error=None ):
         

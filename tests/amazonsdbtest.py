@@ -18,7 +18,7 @@ class AmazonSDBTestCase(unittest.TestCase):
     
     def setUp(self):
         
-        config_path = os.path.abspath( os.path.join( os.path.dirname(__file__), "../../test/config.yaml" ) )
+        config_path = os.path.abspath( os.path.join( os.path.dirname(__file__), "config.yaml" ) )
         
         if not os.path.isfile( config_path ):
             self.raiseConfigException( config_path )
@@ -30,7 +30,7 @@ class AmazonSDBTestCase(unittest.TestCase):
         
         self.sdb = AmazonSDB( config["aws_access_key_id"], config["aws_secret_access_key"])
         
-        self.uuid = hashlib.sha256( config["aws_access_key_id"] + config["aws_secret_access_key"] ).hexdigest()
+        self.uuid = hashlib.sha256( config["aws_access_key_id"] + config["aws_secret_access_key"] + self.__class__.__name__ ).hexdigest()
         
     def raiseConfigException( self, filename ):
         raise Exception("Please create a YAML config file at %s with 'aws_access_key_id' and 'aws_secret_access_key'." % filename )

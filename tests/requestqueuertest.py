@@ -20,8 +20,7 @@ class RequestQueuerTestCase(unittest.TestCase):
         self.rq = RequestQueuer()
         
     def tearDown(self):
-        self.mini_web_server.shutdown()
-        pass
+        return self.mini_web_server.shutdown()
 
     def testRequestQueuerOnSuccess(self):  
         d = self.rq.getPage("http://127.0.0.1:8080", timeout=5)
@@ -32,6 +31,12 @@ class RequestQueuerTestCase(unittest.TestCase):
         d.addErrback( self._getPageErrback )  
         return d      
     
+    def testActive(self):
+        self.failUnlessEqual( isinstance(self.rq.active, int), True )
+            
+    def testPending(self):
+        self.failUnlessEqual( isinstance(self.rq.pending, int), True )
+        
     def _getPageErrback( self, error ):
         return True
         

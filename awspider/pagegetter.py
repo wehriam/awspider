@@ -1,5 +1,5 @@
 from twisted.internet import reactor
-from twisted.internet import defer
+from twisted.internet.defer import Deferred, DeferredList
 from twisted.web.client import HTTPClientFactory, _parse
 from .unicodeconverter import convertToUTF8, convertToUnicode
 import cPickle
@@ -32,11 +32,6 @@ class UTC(tzinfo):
         
 utc = UTC()
 
-def pending_len( d ):
-    if d:
-        return sum( map( len, d.values() ) )
-    else:
-        return 0
         
 class RequestQueuer():
 
@@ -51,8 +46,17 @@ class RequestQueuer():
         self.active_requests = {}
         self.min_request_interval_per_domains = {}
         self.max_simultaneous_requests_per_domains = {}
-        
     
+    def getPending(self):
+        return sum( map( len, self.pending_requests.values() ) )
+        
+    pending = property(getPending)
+    
+    def getActive(self):
+        return sum( self.active_requests.values() )
+        
+    active = property(getActive)
+            
     def setHostMaxRequestsPerSecond( self, host, max_requests_per_second ):
         if max_requests_per_second == 0:
             self.min_request_interval_per_domains[ host ] = 0
@@ -68,7 +72,7 @@ class RequestQueuer():
             
     def checkActive(self):
                 
-        while pending_len( self.pending_requests ) < self.max_simultaneous_requests and pending_len( self.pending_requests ) > 0:
+        while self.active < self.max_simultaneous_requests and self.pending > 0:
             
             in_loop_request_count = 0
             
@@ -125,7 +129,7 @@ class RequestQueuer():
         if etag is not None:
             headers["If-None-Match"] = etag
 
-        deferred = defer.Deferred()
+        deferred = Deferred()
                 
         url = convertToUTF8( url )
         
@@ -208,7 +212,11 @@ class PageGetter:
             self.rq = RequestQueuer()
         else:
             self.rq = rq
-    
+        
+    def clearCache( self, result=None ):
+        d = self.s3.emptyBucket( self.aws_s3_bucket )
+        return d
+        
     def getPage(self, url, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1, hash_url=None, cache=0, prioritize=True ):
 
         cache=int(cache)
@@ -295,8 +303,7 @@ class PageGetter:
         
         if "cache-last-modified" in data["headers"]:
             request_keywords["last_modified"] = data["headers"]["cache-last-modified"][0]
-        
-        #print "Requesting page with etag, last_modified headers"
+    
         logger.debug( "Requesting %s for URL %s etag and last-modified headers." % (request_hash, url) )
         d = self.rq.getPage( url, **request_keywords )
         d.addCallback( self._s3HeadObjectCallback2, request_hash, url )
@@ -310,7 +317,6 @@ class PageGetter:
     def _s3HeadObjectErrback2( self, error, request_hash, url ):
         
         if error.value.status == "304":
-            #print "Page hasn't been modified"
             logger.debug( "Request %s for URL %s hasn't been modified since it was last downloaded. Getting data from S3." % (request_hash, url) )
             d = self.s3.getObject( self.aws_s3_bucket, request_hash )
             d.addCallback( self._s3GetObjectCallback, request_hash )
@@ -381,7 +387,11 @@ class PageGetter:
         if "content-type" in data["headers"]:
             contentType = data["headers"]["content-type"][0]
         
-        self.s3.putObject( self.aws_s3_bucket, request_hash, data["response"], contentType=contentType, headers=headers )
-        return data
+        d = self.s3.putObject( self.aws_s3_bucket, request_hash, data["response"], contentType=contentType, headers=headers )
+        d.addCallback( self._storeDataCallback, data )
+        return d
+        
+    def _storeDataCallback( self, data, response_data ):
+        return response_data
         
         

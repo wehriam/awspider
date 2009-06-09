@@ -17,7 +17,7 @@ class MiniResource:
         def render(self, request):
             
             request.setHeader('Content-type', 'text/javascript; charset=UTF-8')
-            
+                        
             #if "etag" in request.args:
             #    request.setHeader('Etag', 'hItPEjEaBzlhWc5DKKdB3MneWm0')
             #
