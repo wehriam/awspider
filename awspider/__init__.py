@@ -3,13 +3,15 @@
 # Max-age cache
 # Remove dateutil/req from pagegetter
 # Make aws_sdb_reservation_domain optional
+# Make aws cache bucket optional
+# Delete myself function call
 
 from twisted.python.failure import Failure
 
 from uuid import uuid4, uuid5, NAMESPACE_DNS
 from twisted.internet import task
 from twisted.internet import reactor
-from twisted.internet.defer import Deferred, DeferredList
+from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 
 from pagegetter import RequestQueuer, PageGetter
 from unicodeconverter import convertToUTF8
@@ -130,6 +132,9 @@ class AWSpider:
             max_simultaneous_requests_per_domain=int(max_simultaneous_requests_per_domain)
         )
         
+        self.rq.setHostMaxRequestsPerSecond("127.0.0.1", 0)
+        self.rq.setHostMaxSimultaneousRequests("127.0.0.1", 0)
+        
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.aws_s3_cache_bucket = aws_s3_cache_bucket
@@ -202,11 +207,17 @@ class AWSpider:
         
         running_time = time.time() - self.start_time
         cost = (self.sdb.box_usage * .14) * (60*60*24*30.4) / (running_time)
+        active_requests_by_host = self.rq.active_requests
+        pending_requests_by_host = dict( map(lambda x:(x[0], len(x[1])), self.rq.pending_requests.items() ) )
         
         data = {
             "paused":self.paused,
             "running_time":running_time,
-            "cost":cost
+            "cost":cost,
+            "active_requests_by_host":active_requests_by_host,
+            "pending_requests_by_host":pending_requests_by_host,
+            "active_requests":self.rq.active,
+            "pending_requests":self.rq.pending
         }
         
         logger.debug("Got server data:\n%s" % PrettyPrinter.pformat(data) )
@@ -317,10 +328,8 @@ class AWSpider:
             if "call_immediately" in kwargs and not evaluateBoolean( kwargs["call_immediately"] ):    
                 d = DeferredList([a], consumeErrors=True)
             else:
-                logger.debug( "Calling %s in a thread immediately with arguments:\n%s" % (function_name, PrettyPrinter.pformat(filtered_kwargs) ) )
-                b = Deferred()
-                b.addCallback(self._callExposedFunctionWrapper, function["function"], filtered_kwargs, function_name, uuid)
-                reactor.callInThread( b.callback, None )
+                logger.debug( "Calling %s immediately with arguments:\n%s" % (function_name, PrettyPrinter.pformat(filtered_kwargs) ) )
+                b = self.callExposedFunctionImmediately( function["function"], filtered_kwargs, function_name )
                 d = DeferredList([a,b], consumeErrors=True)
             
             d.addCallback( self._createReservationCallback2, function_name, uuid )
@@ -328,11 +337,10 @@ class AWSpider:
             return d
             
         else:
-            logger.debug( "Calling %s in a thread immediately with arguments:\n%s" % (function_name, PrettyPrinter.pformat(filtered_kwargs) ) )
-            d = Deferred()
-            d.addCallback(self.callExposedFunctionImmediately, function["function"], filtered_kwargs, function_name)
-            reactor.callInThread( d.callback, None )
+            logger.debug( "Calling %s immediately with arguments:\n%s" % (function_name, PrettyPrinter.pformat(filtered_kwargs) ) )
+            d = self.callExposedFunctionImmediately( function["function"], filtered_kwargs, function_name )
             return d
+
 
     def _callExposedFunctionWrapper( self, data, func, kwargs, function_name, uuid ):
         return self.callExposedFunction( func, kwargs, function_name, uuid )
@@ -360,22 +368,15 @@ class AWSpider:
         logger.error( "Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error) )
         return error
     
-    def callExposedFunctionImmediately( self, data, func, kwargs, function_name ):
-
-        try:
-            d = func( **kwargs )
-        except Exception, e:
-            return self._callExposedFunctionImmediatelyErrback( Failure(exc_value=sys.exc_value, exc_type=sys.exc_type, exc_tb=sys.exc_traceback), function_name )
-            
-        if isinstance( d, Deferred ):            
-            d.addCallback( self._callExposedFunctionImmediatelyCallback, function_name )
-            d.addErrback( self._callExposedFunctionImmediatelyErrback, function_name )
-            return d
-        else:
-            return self._callExposedFunctionImmediatelyCallback( d, function_name )
+    def callExposedFunctionImmediately( self, func, kwargs, function_name ):
+        
+        d = maybeDeferred( func, **kwargs )
+        d.addCallback( self._callExposedFunctionImmediatelyCallback, function_name )
+        d.addErrback( self._callExposedFunctionImmediatelyErrback, function_name )
+        return d
         
     def _callExposedFunctionImmediatelyCallback( self, data, function_name ):
-        logger.info("Function %s returned successfully:%s" % (function_name, data) )
+        logger.debug("Function %s returned successfully." % (function_name) )
         return data
         
     def _callExposedFunctionImmediatelyErrback( self, error, function_name ):
@@ -387,7 +388,7 @@ class AWSpider:
         return self.makeCallable( expose=True, *args, **kwargs )
         
     def makeCallable( self, func, interval=0, name=None, expose=False ):
-            
+        
         argspec = inspect.getargspec( func )
         arguments = argspec[0]
         if len(arguments) > 0 and arguments[0:1][0] == 'self':
@@ -420,6 +421,9 @@ class AWSpider:
                 message = "Optional argument name '%s' used in function %s is reserved." % (key, function_name)
                 logger.error( message )
                 raise Exception( message )
+        
+        if function_name in self.functions:
+            raise Exception("A method or function with the name %s is already callable." % function_name)
         
         self.functions[ function_name ] = {
             "function":func,

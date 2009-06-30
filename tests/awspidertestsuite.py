@@ -1,7 +1,8 @@
 from amazons3test import AmazonS3TestCase
 from amazonsdbtest import AmazonSDBTestCase
+from awspidertest import AWSpiderStartTestCase, AWSpiderTestCase
 from evaluatebooleantest import EvaluateBooleanTestCase
 from networkaddresstest import NetworkAddressTestCase
-from requestqueuertest import RequestQueuerTestCase
 from pagegettertest import PageGetterTestCase
+from requestqueuertest import RequestQueuerTestCase
 from timeoffsettest import TimeOffsetTestCase

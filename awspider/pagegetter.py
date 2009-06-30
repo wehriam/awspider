@@ -120,8 +120,16 @@ class RequestQueuer():
     
     def getPage(self, url, last_modified=None, etag=None, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1, prioritize=False ):
 
+        if isinstance( postdata, dict ):
+            for key in postdata:
+                postdata[key] = convertToUTF8( postdata[key] )
+            postdata = urllib.urlencode( postdata )
+        
         if headers is None:
             headers = {}
+            
+        if method.lower() == "post":
+            headers["content-type"] = "application/x-www-form-urlencoded"
 
         if last_modified is not None:
             headers['If-Modified-Since'] = time.strftime( "%a, %d %b %Y %T %z", dateutil.parser.parse(last_modified).timetuple() )
@@ -227,17 +235,6 @@ class PageGetter:
         url = convertToUTF8( url )
         if hash_url is not None:
             hash_url = convertToUTF8( hash_url )
-        
-        if isinstance( postdata, dict ):
-            for key in postdata:
-                postdata[key] = convertToUTF8( postdata[key] )
-            postdata = urllib.urlencode( postdata )
-        
-        if method.lower() == "post":
-            if headers is None:
-                headers = {"content-type":"application/x-www-form-urlencoded"}
-            else:
-                headers["content-type"] = "application/x-www-form-urlencoded"
                 
         if method.lower() != "get":
             d = self.rq.getPage( url, method=method, postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, followRedirect=followRedirect, prioritize=prioritize )
@@ -276,9 +273,11 @@ class PageGetter:
     
         try:
             if "cache-expires" in data["headers"]:
+                
                 expires = dateutil.parser.parse(data["headers"]["cache-expires"][0])
                 now = datetime.datetime.now( utc )
-                if expires < now:
+                                
+                if expires > now:
                     logger.debug( "Stored data request %s for URL %s is not stale. Getting from S3." % (request_hash, url) )
                     d = self.s3.getObject( self.aws_s3_bucket, request_hash )
                     d.addCallback( self._s3GetObjectCallback, request_hash )
