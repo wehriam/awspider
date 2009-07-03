@@ -1,3 +1,5 @@
+import urllib
+
 def _safe_quote(unquoted_string):
     """AWS safe version of urllib.quote"""
     return urllib.quote(str(unquoted_string), '-_.~')
