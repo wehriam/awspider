@@ -13,7 +13,8 @@ from twisted.internet import task
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 
-from pagegetter import RequestQueuer, PageGetter
+from pagegetter import PageGetter
+from requestqueuer import RequestQueuer
 from unicodeconverter import convertToUTF8
 
 from aws import AmazonS3, AmazonSDB
@@ -104,8 +105,8 @@ class AWSpider:
                 aws_sdb_coordination_domain=None, 
                 port=8080, 
                 max_simultaneous_requests=50,
-                max_requests_per_domain_per_second=1,
-                max_simultaneous_requests_per_domain=5,
+                max_requests_per_host_per_second=1,
+                max_simultaneous_requests_per_host=5,
                 log_directory=None, 
                 log_level="debug",
                 web_admin=True,
@@ -128,8 +129,8 @@ class AWSpider:
         
         self.rq = RequestQueuer( 
             max_simultaneous_requests=int(max_simultaneous_requests), 
-            max_requests_per_domain_per_second=int(max_requests_per_domain_per_second), 
-            max_simultaneous_requests_per_domain=int(max_simultaneous_requests_per_domain)
+            max_requests_per_host_per_second=int(max_requests_per_host_per_second), 
+            max_simultaneous_requests_per_host=int(max_simultaneous_requests_per_host)
         )
         
         self.rq.setHostMaxRequestsPerSecond("127.0.0.1", 0)
@@ -679,7 +680,6 @@ class AWSpider:
         logger.error( "Unable to query SimpleDB.\n%s" % error )
         
     def _queryCallback( self, data ):
-        
         for uuid in data:
             
             kwargs_raw = {}
@@ -793,7 +793,7 @@ class AWSpider:
             else:    
                 logger.debug( "Putting result for %s, %s on S3." % (function_name, uuid) )
                 pickled_data = cPickle.dumps( data )
-                d = self.s3.putObject( self.aws_s3_storage_bucket, uuid, pickled_data, contentType="text/plain", gzip=True )
+                d = self.s3.putObject( self.aws_s3_storage_bucket, uuid, pickled_data, content_type="text/plain", gzip=True )
                 d.addErrback( self._exposedFunctionErrback2, function_name, uuid )
                 d.addCallback( self._exposedFunctionCallback2, data )
                 return d

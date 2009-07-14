@@ -1,7 +1,7 @@
 from twisted.trial import unittest
 from twisted.internet.defer import Deferred
 
-from awspider.pagegetter import RequestQueuer
+from awspider.requestqueuer import RequestQueuer
 
 import os
 import sys

@@ -3,13 +3,15 @@ import hmac
 import hashlib
 import urllib
 import xml.etree.cElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import dateutil.parser
-
 from ..pagegetter import RequestQueuer
+from .lib import etree_to_dict, safe_quote_tuple
+
 
 SDB_NAMESPACE = "{http://sdb.amazonaws.com/doc/2009-04-15/}"
+
 
 def sdb_now(offset=0):
     """Return an 11 character, zero padded string with the current Unixtime.
@@ -153,7 +155,7 @@ class AmazonSDB:
     def _listDomainsCallback(self, data, previous_results=None):
         xml = ET.fromstring(data["response"])
         self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
-        xml_response = _etree_to_dict(xml, namespace=SDB_NAMESPACE)
+        xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         if "DomainName" in xml_response["ListDomainsResult"][0]:
             results = xml_response["ListDomainsResult"][0]["DomainName"]
         else:
@@ -183,7 +185,7 @@ class AmazonSDB:
     def _domainMetadataCallback(self, data):
         xml = ET.fromstring(data["response"])
         self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
-        xml_response = _etree_to_dict(xml, namespace=SDB_NAMESPACE)
+        xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         return xml_response["DomainMetadataResult"][0]
    
     def putAttributes(self, domain, item_name, attributes, replace=None):
@@ -257,7 +259,7 @@ class AmazonSDB:
     def _getAttributesCallback(self, data):
         xml = ET.fromstring(data["response"])
         self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
-        xml_response = _etree_to_dict(xml, namespace=SDB_NAMESPACE)
+        xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         attributes = {}
         if xml_response["GetAttributesResult"][0] is None:
             raise Exception("Item does not exist.")
@@ -357,17 +359,17 @@ class AmazonSDB:
         items = xml.findall(".//%sItem" % SDB_NAMESPACE)
         results = {}
         for item in items:
-            name = item.find("%sName" % SDB_NAMESPACE).text
+            key = item.find("./%sName" % SDB_NAMESPACE).text
             attributes = item.findall("%sAttribute" % SDB_NAMESPACE)
             attribute_dict = {}
             for attribute in attributes:
-                name = attribute.find("%sName" % SDB_NAMESPACE).text
-                value = attribute.find("%sValue" % SDB_NAMESPACE).text
-                if name in attribute_dict:  
-                    attribute_dict[name].append(value)
+                attr_name = attribute.find("./%sName" % SDB_NAMESPACE).text
+                attr_value = attribute.find("./%sValue" % SDB_NAMESPACE).text
+                if attr_name in attribute_dict:  
+                    attribute_dict[attr_name].append(attr_value)
                 else:
-                    attribute_dict[name] = [value]
-            results[name] = attribute_dict
+                    attribute_dict[attr_name] = [attr_value]
+            results[key] = attribute_dict
         if next_token is not None:
             return self._select(select_expression, next_token=next_token,
                                 previous_results=results)
@@ -398,7 +400,7 @@ class AmazonSDB:
         """
         parameters = parameters.items()
         parameters.sort(lambda x, y:cmp(x[0], y[0]))
-        return "&".join([_safe_quote_tuple(x) for x in parameters])
+        return "&".join([safe_quote_tuple(x) for x in parameters])
        
     def _getAuthorization(self, method, parameters):
         """

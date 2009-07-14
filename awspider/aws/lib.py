@@ -1,16 +1,16 @@
 import urllib
 
-def _safe_quote(unquoted_string):
-    """AWS safe version of urllib.quote"""
-    return urllib.quote(str(unquoted_string), '-_.~')
+__all__ = ["safe_quote_tuple", "etree_to_dict", "return_true"]
 
 
-def _safe_quote_tuple(tuple_):
+def safe_quote_tuple(tuple_):
     """Convert a 2-tuple to a string for use with AWS"""
-    return "%s=%s" % (_safe_quote(tuple_[0]), _safe_quote(tuple_[1]))
+    key = urllib.quote(str(tuple_[0]), '-_.~')
+    value = urllib.quote(str(tuple_[1]), '-_.~')
+    return "%s=%s" % (key, value)
 
 
-def _etree_to_dict(etree, namespace=None):
+def etree_to_dict(etree, namespace=None):
     """
     Convert an etree to a dict.
    
@@ -25,7 +25,7 @@ def _etree_to_dict(etree, namespace=None):
         tag = element.tag
         if namespace is not None:
             tag = tag.replace(namespace, "")
-        element_dict = _etree_to_dict(element, namespace=namespace)
+        element_dict = etree_to_dict(element, namespace=namespace)
         if tag in children_dict:
             children_dict[tag].append(element_dict)
         else:
@@ -33,5 +33,5 @@ def _etree_to_dict(etree, namespace=None):
     return children_dict
 
 
-def _return_true(data):
+def return_true(data):
     return True

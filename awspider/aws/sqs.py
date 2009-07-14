@@ -5,11 +5,13 @@ import urllib
 import xml.etree.cElementTree as ET
 from datetime import datetime, timedelta
 import simplejson
-
 from ..unicodeconverter import convertToUTF8
 from ..pagegetter import RequestQueuer
+from .lib import return_true, safe_quote_tuple
+
 
 SQS_NAMESPACE = "{http://queue.amazonaws.com/doc/2009-02-01/}"
+
 
 class AmazonSQS:
    
@@ -124,7 +126,7 @@ class AmazonSQS:
             "Action":"DeleteQueue"
         }
         d = self._request(parameters, resource=resource, method="DELETE")
-        d.addCallback(_return_true)
+        d.addCallback(return_true)
         d.addErrback(self._genericErrback)
         return d
        
@@ -161,7 +163,7 @@ class AmazonSQS:
             parameters["Attribute.%s.Value" % attr_count] = attributes[name]
             attr_count += 1
         d = self._request(parameters, resource=resource)
-        d.addCallback(_return_true)
+        d.addCallback(return_true)
         d.addErrback(self._genericErrback)
         return d
    
@@ -288,7 +290,7 @@ class AmazonSQS:
             parameters["AWSAccountId.%s" % aws_account_id_count] = name
             aws_account_id_count += 1
         d = self._request(parameters, resource=resource)
-        d.addCallback(_return_true)
+        d.addCallback(return_true)
         d.addErrback(self._genericErrback)
         return d 
 
@@ -311,7 +313,7 @@ class AmazonSQS:
             "Label":label
         }
         d = self._request(parameters, resource=resource)
-        d.addCallback(_return_true)
+        d.addCallback(return_true)
         d.addErrback(self._genericErrback)
         return d 
 
@@ -427,7 +429,7 @@ class AmazonSQS:
             "ReceiptHandle":receipt_handle
         }
         d = self._request(parameters, resource=resource)
-        d.addCallback(_return_true)
+        d.addCallback(return_true)
         d.addErrback(self._genericErrback)
         return d
    
@@ -454,7 +456,7 @@ class AmazonSQS:
             "VisibilityTimeout":int(visibility_timeout)
         }
         d = self._request(parameters, resource=resource)
-        d.addCallback(_return_true)
+        d.addCallback(return_true)
         d.addErrback(self._genericErrback)
         return d
       
@@ -489,7 +491,7 @@ class AmazonSQS:
         # Alphebetize key-value pairs.
         parameters.sort(lambda x, y:cmp(x[0], y[0]))
         # Safe-quote and combine parameters into a string
-        return "&".join([_safe_quote_tuple(x) for x in parameters])
+        return "&".join([safe_quote_tuple(x) for x in parameters])
 
     def _request(self, parameters, method="GET", resource="/"):
         """

@@ -4,13 +4,15 @@ import base64
 import hmac
 import hashlib
 import time
-
+import xml.etree.cElementTree as ET
 from twisted.internet.defer import DeferredList
-
 from ..unicodeconverter import convertToUTF8
 from ..pagegetter import RequestQueuer
+from .lib import return_true
+
 
 S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
+
 
 class AmazonS3:
     """
@@ -59,7 +61,7 @@ class AmazonS3:
             return True
         d = DeferredList(delete_deferreds)
         if xml.find('.//%sIsTruncated' % S3_NAMESPACE).text == "false":
-            d.addCallback(_return_true)
+            d.addCallback(return_true)
         else:
             d.addCallback(self._emptyBucketCallbackRepeat, bucket)
         return d
@@ -69,7 +71,7 @@ class AmazonS3:
    
     def getBucket(self, bucket):
         """
-        List information about the bucket.
+        List information about the objects in the bucket.
        
         **Arguments:**
          * *bucket* -- Bucket name
@@ -83,7 +85,7 @@ class AmazonS3:
 
     def putBucket(self, bucket):
         """
-        Create a bucket.
+        Creates a new bucket.
        
         **Arguments:**
          * *bucket* -- Bucket name
@@ -101,7 +103,7 @@ class AmazonS3:
 
     def deleteBucket(self, bucket):
         """
-        Delete a bucket.
+        Delete the bucket.
        
         **Arguments:**
          * *bucket* -- Bucket name
@@ -120,7 +122,8 @@ class AmazonS3:
 
     def headObject(self, bucket, key):
         """
-        Get an object's headers.
+        Retrieve information about a specific object or object size, without
+        actually fetching the object itself.
        
         **Arguments:**
          * *bucket* -- Bucket name
@@ -147,7 +150,8 @@ class AmazonS3:
 
     def getObject(self, bucket, key):
         """
-        Get an object.
+        Returns object directly from Amazon S3 using a client/server 
+        delivery mechanism.
        
         **Arguments:**
          * *bucket* -- Bucket name
@@ -184,7 +188,7 @@ class AmazonS3:
     def putObject(self, bucket, key, data, content_type="text/html", 
                   public=True, headers=None, gzip=False):
         """
-        Put an object.
+        Add an object to a bucket.
        
         **Arguments:**
          * *bucket* -- Bucket name
@@ -234,7 +238,7 @@ class AmazonS3:
 
     def deleteObject(self, bucket, key):
         """
-        Delete an object.
+        Remove the specified object from Amazon S3.
        
         **Arguments:**
          * *bucket* -- Bucket name

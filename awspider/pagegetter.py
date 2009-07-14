@@ -1,28 +1,19 @@
-from twisted.internet import reactor
-from twisted.internet.defer import Deferred, DeferredList
-from twisted.web.client import HTTPClientFactory, _parse
-from .unicodeconverter import convertToUTF8, convertToUnicode
 import cPickle
 import sha
-import time
+
 import dateutil.parser
 import datetime
-import urllib
+
+from .requestqueuer import RequestQueuer
+from .unicodeconverter import convertToUTF8, convertToUnicode
 
 import logging
 logger = logging.getLogger("main")
 
-import sys
-from twisted.python.failure import Failure
-
-from datetime import tzinfo, timedelta
-
-from twisted.internet import task
-
 # A UTC class.
 
-class UTC(tzinfo):
-    ZERO = timedelta(0)
+class UTC(datetime.tzinfo):
+    ZERO = datetime.timedelta(0)
     def utcoffset(self, dt):
         return self.ZERO
     def tzname(self, dt):
@@ -32,183 +23,6 @@ class UTC(tzinfo):
         
 utc = UTC()
 
-        
-class RequestQueuer():
-
-    def __init__(self, max_simultaneous_requests=50, max_requests_per_domain_per_second=1, max_simultaneous_requests_per_domain=5 ):
-    
-        self.max_simultaneous_requests = max_simultaneous_requests
-        self.min_request_interval_per_domain = 1.0 / float(max_requests_per_domain_per_second)
-        self.max_simultaneous_requests_per_domain = max_simultaneous_requests_per_domain
-        
-        self.pending_requests = {}
-        self.pending_last_request = {}
-        self.active_requests = {}
-        self.min_request_interval_per_domains = {}
-        self.max_simultaneous_requests_per_domains = {}
-    
-    def getPending(self):
-        return sum( map( len, self.pending_requests.values() ) )
-        
-    pending = property(getPending)
-    
-    def getActive(self):
-        return sum( self.active_requests.values() )
-        
-    active = property(getActive)
-            
-    def setHostMaxRequestsPerSecond( self, host, max_requests_per_second ):
-        if max_requests_per_second == 0:
-            self.min_request_interval_per_domains[ host ] = 0
-        else:        
-            min_request_interval = 1.0 / float(max_requests_per_second)
-            self.min_request_interval_per_domains[ host ] = min_request_interval
-    
-    def setHostMaxSimultaneousRequests( self, host, max_simultaneous_requests ):
-        if max_simultaneous_requests == 0:
-            self.max_simultaneous_requests_per_domains[ host ] = self.max_simultaneous_requests
-        else:
-            self.max_simultaneous_requests_per_domains[ host ] = max_simultaneous_requests
-            
-    def checkActive(self):
-                
-        while self.active < self.max_simultaneous_requests and self.pending > 0:
-            
-            in_loop_request_count = 0
-            
-            for host in self.pending_requests:
-                if len( self.pending_requests[ host ] ) > 0 and \
-                time.time() - self.pending_last_request.get( host, 0 ) > self.min_request_interval_per_domains.get( host, self.min_request_interval_per_domain ) and \
-                self.active_requests.get( host, 0 ) < self.max_simultaneous_requests_per_domains.get( host, self.max_simultaneous_requests_per_domain ):
-                    
-                    in_loop_request_count += 1
-                    req = self.pending_requests[ host ].pop(0)
-                    d = self._getPage(  
-                        req["url"], 
-                        method=req["method"], 
-                        postdata=req["postdata"],
-                        headers=req["headers"], 
-                        agent=req["agent"], 
-                        timeout=req["timeout"], 
-                        cookies=req["cookies"],
-                        followRedirect=req["followRedirect"]
-                    )
-                    d.addCallback( self.requestComplete, req["deferred"], host )
-                    d.addErrback( self.requestError, req["deferred"], host )
-                    self.pending_last_request[ host ] = time.time()
-                    self.active_requests[ host ] = self.active_requests.get( host, 0 ) + 1
-            
-            if in_loop_request_count == 0:
-                reactor.callLater( .1, self.checkActive)
-                return
-        
-    def requestComplete( self, response, deferred, host ):
-        self.active_requests[ host ] -= 1
-        if host in self.pending_requests and len(self.pending_requests[host]) == 0:
-            del self.pending_requests[host]
-        self.checkActive()
-        deferred.callback( response )
-        return None
-
-    def requestError( self, error, deferred, host ):
-        self.active_requests[ host ] -= 1
-        if host in self.pending_requests and len(self.pending_requests[host]) == 0:
-            del self.pending_requests[host]
-        self.checkActive()
-        deferred.errback( error )
-        return None
-    
-    def getPage(self, url, last_modified=None, etag=None, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1, prioritize=False ):
-
-        if isinstance( postdata, dict ):
-            for key in postdata:
-                postdata[key] = convertToUTF8( postdata[key] )
-            postdata = urllib.urlencode( postdata )
-        
-        if headers is None:
-            headers = {}
-            
-        if method.lower() == "post":
-            headers["content-type"] = "application/x-www-form-urlencoded"
-
-        if last_modified is not None:
-            headers['If-Modified-Since'] = time.strftime( "%a, %d %b %Y %T %z", dateutil.parser.parse(last_modified).timetuple() )
-
-        if etag is not None:
-            headers["If-None-Match"] = etag
-
-        deferred = Deferred()
-                
-        url = convertToUTF8( url )
-        
-        req = { 
-            "url":url, 
-            "method":method, 
-            "postdata":postdata,
-            "headers":headers, 
-            "agent":agent, 
-            "timeout":timeout, 
-            "cookies":cookies,
-            "followRedirect":followRedirect,
-            "deferred":deferred 
-        }
-                
-        host = _parse(url)[1]
-        
-        if host not in self.pending_requests:
-            self.pending_requests[ host ] = []
-        
-        if prioritize:
-            self.pending_requests[ host ].insert( 0, req )
-        else:
-            self.pending_requests[ host ].append( req )
-        
-
-        self.checkActive()
-
-        return deferred
-
-    def _getPage(self, url, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1 ):
-
-        if headers is None:
-            headers = {}
-
-        scheme, host, port, path = _parse(url)
-
-        factory = HTTPClientFactory(
-            url, 
-            method=method, 
-            postdata=postdata,
-            headers=headers, 
-            agent=agent, 
-            timeout=timeout, 
-            cookies=cookies,
-            followRedirect=followRedirect
-        )
-
-        if scheme == 'https':
-            from twisted.internet import ssl
-            contextFactory = ssl.ClientContextFactory()
-            reactor.connectSSL(host, port, factory, contextFactory, timeout=timeout)
-        else:
-            reactor.connectTCP(host, port, factory, timeout=timeout)
-
-        factory.deferred.addCallback( self._getPageComplete, factory )
-        factory.deferred.addErrback( self._getPageError, factory )
-        return factory.deferred
-
-    def _getPageComplete( self, response, factory ):
-        return {"response":response, "headers":factory.response_headers, "status":int(factory.status), "message":factory.message }
-
-    def _getPageError( self, error, factory ):
-        
-        if "response_headers" in factory.__dict__ and factory.response_headers is not None:
-            error.value.headers = factory.response_headers
-        
-        return error
-
-
-        
 class PageGetter:
     
     def __init__( self, s3, aws_s3_bucket, rq=None ):
@@ -225,7 +39,7 @@ class PageGetter:
         d = self.s3.emptyBucket( self.aws_s3_bucket )
         return d
         
-    def getPage(self, url, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, followRedirect=1, hash_url=None, cache=0, prioritize=True ):
+    def getPage(self, url, method='GET', postdata=None, headers=None, agent="AWSpider", timeout=60, cookies=None, follow_redirect=1, hash_url=None, cache=0, prioritize=True ):
 
         cache=int(cache)
         
@@ -237,7 +51,7 @@ class PageGetter:
             hash_url = convertToUTF8( hash_url )
                 
         if method.lower() != "get":
-            d = self.rq.getPage( url, method=method, postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, followRedirect=followRedirect, prioritize=prioritize )
+            d = self.rq.getPage( url, method=method, postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, follow_redirect=follow_redirect, prioritize=prioritize )
             return d       
         
         parameters_to_be_hashed = cPickle.dumps( [headers, agent, cookies] )
@@ -249,25 +63,25 @@ class PageGetter:
         
         if cache == -1:
             logger.debug( "Getting request %s for URL %s." % (request_hash, url) )
-            d = self.rq.getPage( url, method="GET", postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, followRedirect=followRedirect, prioritize=prioritize )
+            d = self.rq.getPage( url, method="GET", postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, follow_redirect=follow_redirect, prioritize=prioritize )
             d.addCallback( self._storeData, request_hash )
             return d
             
         if cache == 0:
             logger.debug( "Checking S3 Head object request %s for URL %s." % (request_hash, url) )
             d = self.s3.headObject( self.aws_s3_bucket, request_hash )
-            d.addCallback( self._s3HeadObjectCallback, url, request_hash, postdata, headers, agent, timeout, cookies, followRedirect, prioritize )
-            d.addErrback( self._s3HeadObjectErrback, url, request_hash, postdata, headers, agent, timeout, cookies, followRedirect, prioritize )        
+            d.addCallback( self._s3HeadObjectCallback, url, request_hash, postdata, headers, agent, timeout, cookies, follow_redirect, prioritize )
+            d.addErrback( self._s3HeadObjectErrback, url, request_hash, postdata, headers, agent, timeout, cookies, follow_redirect, prioritize )        
             return d
         
         if cache == 1:
             logger.debug( "Getting S3 object request %s for URL %s." % (request_hash, url) )
             d = self.s3.getObject( self.aws_s3_bucket, request_hash )
             d.addCallback( self._s3GetObjectCallback, request_hash )
-            d.addErrback( self._s3HeadObjectErrback, url, request_hash, postdata, headers, agent, timeout, cookies, followRedirect, prioritize )       
+            d.addErrback( self._s3HeadObjectErrback, url, request_hash, postdata, headers, agent, timeout, cookies, follow_redirect, prioritize )       
             return d             
         
-    def _s3HeadObjectCallback( self, data, url, request_hash, postdata, headers, agent, timeout, cookies, followRedirect, prioritize ):
+    def _s3HeadObjectCallback( self, data, url, request_hash, postdata, headers, agent, timeout, cookies, follow_redirect, prioritize ):
         
         logger.debug( "Got S3 Head object request %s for URL %s." % (request_hash, url) )
     
@@ -293,7 +107,7 @@ class PageGetter:
             "agent":agent, 
             "timeout":timeout, 
             "cookies":cookies, 
-            "followRedirect":followRedirect, 
+            "follow_redirect":follow_redirect, 
             "prioritize":prioritize
         }
         
@@ -355,12 +169,12 @@ class PageGetter:
         else:
             return page_error
             
-    def _s3HeadObjectErrback(self, error, url, request_hash, postdata, headers, agent, timeout, cookies, followRedirect, prioritize):
+    def _s3HeadObjectErrback(self, error, url, request_hash, postdata, headers, agent, timeout, cookies, follow_redirect, prioritize):
         # No header, let's get the object!
         
         logger.debug( "Unable to find header for request %s on S3, fetching from %s." % (request_hash, url) )
         
-        d = self.rq.getPage( url, method="GET", postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, followRedirect=followRedirect, prioritize=prioritize )
+        d = self.rq.getPage( url, method="GET", postdata=postdata, headers=headers, agent=agent, timeout=timeout, cookies=cookies, follow_redirect=follow_redirect, prioritize=prioritize )
         d.addCallback( self._storeData, request_hash )
         return d
         
@@ -384,9 +198,9 @@ class PageGetter:
             headers["cache-last-modified"] = data["headers"]["last-modified"][0]
 
         if "content-type" in data["headers"]:
-            contentType = data["headers"]["content-type"][0]
+            content_type = data["headers"]["content-type"][0]
         
-        d = self.s3.putObject( self.aws_s3_bucket, request_hash, data["response"], contentType=contentType, headers=headers )
+        d = self.s3.putObject( self.aws_s3_bucket, request_hash, data["response"], content_type=content_type, headers=headers )
         d.addCallback( self._storeDataCallback, data )
         return d
         
