@@ -194,6 +194,12 @@ class AWSpider:
             logger.setLevel(logging.DEBUG)
     
         logger.info("Successfully loaded the Spider's configuration.")
+    
+    def setHostMaxRequestsPerSecond(self, host, requests_per_second):
+        return self.rq.setHostMaxRequestsPerSecond(host, requests_per_second)
+    
+    def setHostMaxSimultaneousRequests(self, host, simultaneous_requests):
+        return self.rq.setHostMaxSimultaneousRequests(host, simultaneous_requests)
 
     def clearStorage( self ):
         if self.aws_s3_storage_bucket is not None:
@@ -208,8 +214,8 @@ class AWSpider:
         
         running_time = time.time() - self.start_time
         cost = (self.sdb.box_usage * .14) * (60*60*24*30.4) / (running_time)
-        active_requests_by_host = self.rq.active_requests
-        pending_requests_by_host = dict( map(lambda x:(x[0], len(x[1])), self.rq.pending_requests.items() ) )
+        active_requests_by_host = self.rq.getActiveRequestsByHost()
+        pending_requests_by_host = self.rq.getPendingRequestsByHost()
         
         data = {
             "paused":self.paused,
@@ -217,8 +223,8 @@ class AWSpider:
             "cost":cost,
             "active_requests_by_host":active_requests_by_host,
             "pending_requests_by_host":pending_requests_by_host,
-            "active_requests":self.rq.active,
-            "pending_requests":self.rq.pending
+            "active_requests":self.rq.getActive(),
+            "pending_requests":self.rq.getPending()
         }
         
         logger.debug("Got server data:\n%s" % PrettyPrinter.pformat(data) )
@@ -863,7 +869,7 @@ class AWSpider:
         return d
         
     def _waitForShutdown( self, shutdown_deferred ):          
-        if self.rq.pending > 0 or self.rq.active > 0:
+        if self.rq.getPending() > 0 or self.rq.getActive() > 0:
             logger.debug( "Waiting for shutdown." )
             reactor.callLater( .1, self._waitForShutdown, shutdown_deferred )
             return

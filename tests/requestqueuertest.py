@@ -32,11 +32,17 @@ class RequestQueuerTestCase(unittest.TestCase):
         return d      
     
     def testActive(self):
-        self.failUnlessEqual( isinstance(self.rq.active, int), True )
+        self.failUnlessEqual( isinstance(self.rq.getActive(), int), True )
             
     def testPending(self):
-        self.failUnlessEqual( isinstance(self.rq.pending, int), True )
-        
+        self.failUnlessEqual( isinstance(self.rq.getPending(), int), True )
+
+    def testActiveRequestsByHost(self):
+        self.failUnlessEqual( isinstance(self.rq.getActiveRequestsByHost(), dict), True )
+
+    def testPendingRequestsByHost(self):
+        self.failUnlessEqual( isinstance(self.rq.getPendingRequestsByHost(), dict), True )
+
     def _getPageErrback( self, error ):
         return True
         
