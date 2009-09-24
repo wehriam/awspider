@@ -4,11 +4,13 @@ import base64
 import hmac
 import hashlib
 import time
+import urllib
 import xml.etree.cElementTree as ET
-from twisted.internet.defer import DeferredList
+from twisted.internet import reactor
+from twisted.internet.defer import Deferred, DeferredList, deferredGenerator, waitForDeferred
 from ..unicodeconverter import convertToUTF8
 from ..pagegetter import RequestQueuer
-from .lib import return_true
+from .lib import return_true, etree_to_dict
 
 
 S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
@@ -69,6 +71,40 @@ class AmazonS3:
     def _emptyBucketCallbackRepeat(self, data, bucket):
         return self.emptyBucket(bucket)
    
+#    def listObjects(self, bucket, marker=None):
+#        """
+#        List information about the objects in the bucket.
+#
+#        **Arguments:**
+#         * *bucket* -- Bucket name
+#        """
+#        bucket = convertToUTF8(bucket)
+#        path = bucket
+#        if marker is not None:
+#            path = urllib.urlencode({"marker":marker})
+#        headers = self._getAuthorization("GET", "", "", {}, "/" + path)
+#        url = "http://%s/%s" % (self.host, path)
+#        d = self.rq.getPage(url, method="GET", headers=headers)
+#        d.addCallback(self._listObjectsCallback, bucket)
+#        d.addErrback(self._genericErrback, url, method="GET", headers=headers)
+#        return d
+#    
+#    @deferredGenerator
+#    def _listObjectsCallback(self, result, bucket):
+#        xml = ET.XML(result["response"])            
+#        data = etree_to_dict(xml, namespace='{http://s3.amazonaws.com/doc/2006-03-01/}')
+#        for obj in data["Contents"]:
+#            for key in obj:
+#                obj[key] = obj[key][0]
+#            for key in obj["Owner"]:
+#                obj["Owner"][key] = obj["Owner"][key][0]
+#            yield obj
+#        
+#        if data["IsTruncated"][0] == "true":
+#            d = self.listObjects(bucket, marker=obj["Key"])
+#            wfd = waitForDeferred(d)
+#            yield wfd
+            
     def getBucket(self, bucket):
         """
         List information about the objects in the bucket.
@@ -82,7 +118,7 @@ class AmazonS3:
         d = self.rq.getPage(url, method="GET", headers=headers)
         d.addErrback(self._genericErrback, url, method="GET", headers=headers)
         return d       
-
+        
     def putBucket(self, bucket):
         """
         Creates a new bucket.
@@ -201,7 +237,6 @@ class AmazonS3:
          * *headers* -- Custom header dictionary (Default empty dictionary)
          * *gzip* -- Boolean flag to gzip data (Default False)
         """
-        data = convertToUTF8(data)
         bucket = convertToUTF8(bucket)
         key = convertToUTF8(key)
         if headers is None:

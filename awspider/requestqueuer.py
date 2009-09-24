@@ -153,12 +153,15 @@ class RequestQueuer(object):
            queue. (Default ``False``)         
 
         """
+        if headers is None:
+            headers={}
         if postdata is not None:
-            if not isinstance(postdata, dict):
-                raise Exception("Postdata must be a dictionary.")
-            for key in postdata:
-                postdata[key] = convertToUTF8(postdata[key])
-            postdata = urllib.urlencode(postdata)
+            if isinstance(postdata, dict):
+                for key in postdata:
+                    postdata[key] = convertToUTF8(postdata[key])
+                postdata = urllib.urlencode(postdata)
+            else:
+                convertToUTF8(postdata)
         if method.lower() == "post":
             headers["content-type"] = "application/x-www-form-urlencoded"
         if last_modified is not None:

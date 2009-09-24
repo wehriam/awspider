@@ -56,7 +56,7 @@ logger = logging.getLogger("main")
 from timeoffset import getTimeOffset
 from networkaddress import getNetworkAddress
 
-
+from .exceptions import DeleteReservationException
 
 from .evaluateboolean import evaluateBoolean
 
@@ -496,7 +496,7 @@ class AWSpider:
         for row in data:
             if row[0] == False:
                 d = self.shutdown()
-                d.addCallback( self._startHandleError, error )
+                d.addCallback( self._startHandleError, row[1] )
                 return d
         
         self.shutdown_trigger_id = reactor.addSystemEventTrigger('before', 'shutdown', self.shutdown )  
@@ -658,10 +658,13 @@ class AWSpider:
         logger.error( "Error deleting reservations for %s.\n%s" ) % (function_name, error)
         
     def deleteReservation( self, uuid, function_name="Unknown" ):
-        logger.info( "Deleting reservation %s, %s." % (function_name, uuid) )
-        d = self.sdb.delete( self.aws_sdb_reservation_domain, uuid )
-        d.addCallback( self._deleteReservationCallback, function_name, uuid )
-        d.addErrback( self._deleteReservationErrback, function_name, uuid )
+        logger.info("Deleting reservation %s, %s." % (function_name, uuid))
+        deferreds = []
+        deferreds.append(self.sdb.delete(self.aws_sdb_reservation_domain, uuid))
+        deferreds.append(self.s3.deleteObject(self.aws_s3_storage_bucket, uuid))
+        d = DeferredList(deferreds)
+        d.addCallback(self._deleteReservationCallback, function_name, uuid)
+        d.addErrback(self._deleteReservationErrback, function_name, uuid)
         return d
         
     def _deleteReservationCallback( self, data, function_name, uuid ):
@@ -671,6 +674,14 @@ class AWSpider:
     def _deleteReservationErrback( self, error, function_name, uuid ):
         logger.error( "Error deleting reservation %s, %s.\n%s" ) % (function_name, uuid, error)
         return False
+    
+    def queryByUUID(self, uuid):
+        sql = "SELECT * FROM `%s` WHERE itemName() = '%s'" % (self.aws_sdb_reservation_domain, uuid)
+        #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
+        d = self.sdb.select( sql )
+        d.addCallback( self._queryCallback )
+        d.addErrback( self._queryErrback )        
+        return d
         
     def query( self ):
         
@@ -808,6 +819,19 @@ class AWSpider:
         return data
     
     def _exposedFunctionErrback( self, error, function_name, uuid ):
+        try:
+            error.raiseException()
+        except DeleteReservationException, e:
+            self.deleteReservation(uuid)
+            message = """Error with %s, %s.\n%s            
+            Reservation deleted at request of the function.""" % (
+                function_name,
+                uuid,
+                error)
+            logger.error(message)
+            return
+        except:
+            pass
         logger.error( "Error with %s, %s.\n%s" % (function_name, uuid, error) )
     
     def _exposedFunctionErrback2( self, error, function_name, uuid ):

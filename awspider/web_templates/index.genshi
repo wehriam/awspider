@@ -52,6 +52,14 @@
 	</div>
 	<div class="span-6">
 		<h2>Controls:</h2>
+		<h3>Execute reservation</h3>
+		<form action="data/execute_reservation" method="get" id="form_execute_reservation">
+			<fieldset>
+				<input type="text" name="uuid" />
+				<input type="submit" value="Execute" /><br />
+				Execute a reservation with the UUID.
+			</fieldset>
+		</form>
 		<h3>Delete reservation</h3>
 		<form action="data/delete_reservation" method="get" id="form_delete_reservation">
 			<fieldset>
