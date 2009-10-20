@@ -7,6 +7,7 @@ $(document).ready(function() {
 	$('#form_shutdown').ajaxForm({"dataType":"json", "success":form_shutdown_callback, "beforeSubmit":form_shutdown_beforesubmit})
 	$('#form_delete_reservation').ajaxForm({"dataType":"json", "success":form_delete_reservation_callback})
 	$('#form_delete_function_reservations').ajaxForm({"dataType":"json", "success":form_delete_function_reservations_callback})
+	$('#form_execute_reservation input[type=text]').clearingInput({"text":"UUID"})
 	$('#form_delete_reservation input[type=text]').clearingInput({"text":"UUID"})
 	$('#form_delete_function_reservations input[type=text]').clearingInput({"text":"Function name"});
 	$('#form_show_reservation input[type=text]').clearingInput({"text":"UUID"});
@@ -25,7 +26,6 @@ $(document).ready(function() {
 		"dataType": "json",
 		"success":data_exposed_function_details_callback
 	})		
-
 
 })
 
@@ -134,6 +134,30 @@ data_server_callback = function( data ) {
 		} else {
 			resume()
 		}
+	}
+	if(typeof data["pending_requests_by_host"] != "undefined") {
+		var message = [];
+		for(var host in data["pending_requests_by_host"]) {
+			if(parseInt(data["pending_requests_by_host"][host]) > 0) {
+				message.push("<b>" + host + ":</b> " + data["pending_requests_by_host"][host])
+			}
+		}
+		$("#pending_requests_by_host").html(message.join(", ")).fadeIn()
+	}
+	if(typeof data["active_requests_by_host"] != "undefined") {
+		var message = [];
+		for(var host in data["active_requests_by_host"]) {
+			if(parseInt(data["active_requests_by_host"][host]) > 0) {
+				message.push("<b>" + host + ":</b> " + data["active_requests_by_host"][host])
+			}
+		}
+		$("#active_requests_by_host").html(message.join(", ")).fadeIn()
+	}
+	if(typeof data["active_requests"] != "undefined") {
+		$("#active_requests").html(data["active_requests"]).fadeIn()
+	}
+	if(typeof data["pending_requests"] != "undefined") {
+		$("#pending_requests").html(data["pending_requests"]).fadeIn()
 	}
 }
 

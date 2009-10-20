@@ -12,3 +12,20 @@
 #exposed_functions table td, #exposed_functions table th {
 	vertical-align:top;
 }
+#request_data {
+    width:auto;
+}
+#request_data th, #request_data td {
+    margin:0;
+    padding:2px;
+}
+#pending_requests, #active_requests {
+    font-size:14px;  
+}
+#request_data th {
+    text-align:right;
+    font-size:14px;
+}
+#request_data td {
+    text-align:left;
+}

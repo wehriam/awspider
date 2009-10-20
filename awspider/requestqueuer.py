@@ -77,7 +77,7 @@ class RequestQueuer(object):
         """
         Return a dictionary of the number of pending requests by host.
         """
-        reqs = [lambda x:(x[0], len(x[1])) for x in self.pending_reqs.items()]
+        reqs = [(x[0], len(x[1])) for x in self.pending_reqs.items()]
         return dict(reqs)
 
     def setHostMaxRequestsPerSecond(self, host, max_requests_per_second):

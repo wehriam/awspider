@@ -11,6 +11,22 @@
 	<div class="span-24 last">
 		<h1>AWSpider <span id="paused">(paused)</span></h1>
 		<p id="running_time">The spider has been running for an unknown period of time.</p>
+		<table id="request_data">
+			<tr>
+				<th>Active requests:</th>
+				<td id="active_requests"></td>
+			</tr>
+			<tr>
+				<td id="active_requests_by_host" colspan="2"></td>
+			</tr>
+			<tr>
+				<th>Pending requests:</th>
+				<td id="pending_requests"></td>
+			</tr>
+			<tr>
+				<td id="pending_requests_by_host"  colspan="2"></td>
+			</tr>			
+		</table>
 	</div>
 	<div class="span-6">
 		<h2>System controls:</h2>
