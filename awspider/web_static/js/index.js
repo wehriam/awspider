@@ -122,13 +122,9 @@ data_server_callback = function( data ) {
 		if( typeof data["cost"] != "undefined" ) {
 			message = message + " At its current rate, the spider will cost about $" + Math.round(data["cost"]*Math.pow(10,2))/Math.pow(10,2) + " per month.";
 		}
-		$("#running_time").fadeOut(function(){
-			$("#running_time").html( message ).fadeIn()
-		})
-
+		$("#running_time").html(message).fadeIn()
 	}
-	if( typeof data["paused"] != "undefined" ) {
-		
+	if(typeof data["paused"] != "undefined") {
 		if( data["paused"] ) {
 			pause()
 		} else {

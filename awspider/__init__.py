@@ -5,6 +5,7 @@
 # Make aws_sdb_reservation_domain optional
 # Make aws cache bucket optional
 # Delete myself function call
+# Unleash the fury call
 
 from twisted.python.failure import Failure
 
@@ -112,8 +113,8 @@ class AWSpider:
                 web_admin=True,
                 web_admin_port=None,
                 time_offset=None,
-                peer_check_interval=5,
-                reservation_check_interval=5,
+                peer_check_interval=30,
+                reservation_check_interval=30,
                 hammer_prevention=True ):
         
         self.start_deferred = Deferred()
@@ -679,24 +680,45 @@ class AWSpider:
         sql = "SELECT * FROM `%s` WHERE itemName() = '%s'" % (self.aws_sdb_reservation_domain, uuid)
         #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         d = self.sdb.select( sql )
-        d.addCallback( self._queryCallback )
+        d.addCallback( self._queryCallback2 )
         d.addErrback( self._queryErrback )        
         return d
         
     def query( self ):
         
-        sql = "SELECT * FROM `%s` WHERE reservation_next_request < '%s' INTERSECTION reservation_error != '1'" % ( self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset) )
-        
+        sql = """SELECT itemName() 
+                FROM `%s` 
+                WHERE
+                reservation_next_request < '%s' 
+                
+                """ % (self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset))
+        #INTERSECTION reservation_error != '1'
         #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         
         d = self.sdb.select( sql )
         d.addCallback( self._queryCallback )
         d.addErrback( self._queryErrback )
     
-    def _queryErrback( self, error ):
+    def _queryErrback(self, error):
         logger.error( "Unable to query SimpleDB.\n%s" % error )
         
-    def _queryCallback( self, data ):
+    def _queryCallback(self, data):
+        keys = data.keys()
+        if len(keys) > 0:
+            i = 0
+            while i * 20 < len(keys):
+                key_subset = keys[i*20:(i+1)*20]
+                i += 1
+                sql = """SELECT *
+                        FROM `%s` 
+                        WHERE
+                        itemName() in('%s')
+                        """ % (self.aws_sdb_reservation_domain, "','".join(key_subset))
+                d = self.sdb.select(sql)
+                d.addCallback(self._queryCallback2)
+                d.addErrback(self._queryErrback)
+        
+    def _queryCallback2(self, data):
         for uuid in data:
             
             kwargs_raw = {}

@@ -192,7 +192,10 @@ class RequestQueuer(object):
         return req["deferred"]
 
     def _hostRequestCheck(self, host):
+        if host not in self.pending_reqs:
+            return False
         if len(self.pending_reqs[host]) == 0:
+            del self.pending_reqs[host]
             return False
         if host in self.last_req:
             if host in self.min_req_interval_per_hosts:
@@ -213,9 +216,12 @@ class RequestQueuer(object):
         return True
 
     def _checkActive(self):
-        while self.getActive() < self.max_simul_reqs and self.getPending() > 0:
+        
+        #self.pending_reqs = dict([(x[0],x[1]) for x in filter(lambda x:len(x[1]) > 0, self.pending_reqs.items())])
+        while self.getActive() < self.max_simul_reqs and self.getPending() > 0:        
             in_loop_req_count = 0
-            for host in self.pending_reqs:
+            hosts = self.pending_reqs.keys()
+            for host in hosts:
                 if self._hostRequestCheck(host):
                     in_loop_req_count += 1
                     req = self.pending_reqs[host].pop(0)
@@ -227,19 +233,16 @@ class RequestQueuer(object):
             if in_loop_req_count == 0:
                 reactor.callLater(.1, self._checkActive)
                 return
+ 
 
     def _requestComplete(self, response, deferred, host):
         self.active_reqs[host] -= 1
-        if host in self.pending_reqs and len(self.pending_reqs[host]) == 0:
-            del self.pending_reqs[host]
         self._checkActive()
         deferred.callback(response)
         return None
 
     def _requestError(self, error, deferred, host):
         self.active_reqs[host] -= 1
-        if host in self.pending_reqs and len(self.pending_reqs[host]) == 0:
-            del self.pending_reqs[host]
         self._checkActive()
         deferred.errback(error)
         return None

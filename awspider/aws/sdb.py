@@ -6,8 +6,12 @@ import xml.etree.cElementTree as ET
 from datetime import datetime
 import time
 import dateutil.parser
+import logging
 from ..pagegetter import RequestQueuer
 from .lib import etree_to_dict, safe_quote_tuple
+
+
+logger = logging.getLogger("main")
 
 
 SDB_NAMESPACE = "{http://sdb.amazonaws.com/doc/2009-04-15/}"
@@ -109,12 +113,15 @@ class AmazonSDB:
             "DomainName":domain
         }
         d = self._request(parameters)
-        d.addCallback(self._createDomainCallback)
+        d.addCallback(self._createDomainCallback, domain)
         return d
 
-    def _createDomainCallback(self, data):
+    def _createDomainCallback(self, data, domain):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        logger.debug("Created SimpleDB domain '%s'. Box usage: %s" % (domain,
+            box_usage))
         return True
    
     def deleteDomain(self, domain):
@@ -128,12 +135,15 @@ class AmazonSDB:
         parameters["Action"] = "DeleteDomain"
         parameters["DomainName"] = domain
         d = self._request(parameters)
-        d.addCallback(self._deleteDomainCallback)
+        d.addCallback(self._deleteDomainCallback, domain)
         return d
 
-    def _deleteDomainCallback(self, data):
+    def _deleteDomainCallback(self, data, domain):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        logger.debug("Deleted SimpleDB domain '%s'. Box usage: %s" % (domain, 
+            box_usage))
         return True   
 
     def listDomains(self):
@@ -142,19 +152,28 @@ class AmazonSDB:
         """
         return self._listDomains()
    
-    def _listDomains(self, next_token=None, previous_results=None):
+    def _listDomains(self, 
+                     next_token=None, 
+                     previous_results=None, 
+                     total_box_usage=0):
         parameters = {}
         parameters["Action"] = "ListDomains"
         if next_token is not None:
             parameters["NextToken"] = next_token
         d = self._request(parameters)
         d.addCallback(self._listDomainsCallback, 
-                      previous_results=previous_results)
+                      previous_results=previous_results,
+                      total_box_usage=total_box_usage)
         return d
 
-    def _listDomainsCallback(self, data, previous_results=None):
+    def _listDomainsCallback(self, 
+                             data, 
+                             previous_results=None, 
+                             total_box_usage=0):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        total_box_usage += box_usage
         xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         if "DomainName" in xml_response["ListDomainsResult"][0]:
             results = xml_response["ListDomainsResult"][0]["DomainName"]
@@ -165,7 +184,9 @@ class AmazonSDB:
         if "NextToken" in xml_response["ListDomainsResult"]:
             next_token = xml_response["ListDomainsResult"][0]["NextToken"][0]
             return self._listDomains(next_token=next_token,
-                                     previous_results=results)
+                                     previous_results=results,
+                                     total_box_usage=total_box_usage)
+        logger.debug("Listed domains. Box usage: %s" % total_box_usage)
         return results
 
     def domainMetadata(self, domain):
@@ -179,12 +200,16 @@ class AmazonSDB:
         parameters["Action"] = "DomainMetadata"
         parameters["DomainName"] = domain
         d = self._request(parameters)
-        d.addCallback(self._domainMetadataCallback)
+        d.addCallback(self._domainMetadataCallback, domain)
         return d
        
-    def _domainMetadataCallback(self, data):
+    def _domainMetadataCallback(self, data, domain):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        logger.debug("Got SimpleDB domain '%s' metadata. Box usage: %s" % (
+            domain,
+            box_usage))
         xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         return xml_response["DomainMetadataResult"][0]
    
@@ -227,12 +252,18 @@ class AmazonSDB:
                 parameters["Attribute.%s.Replace" % i] = "true"
             i += 1
         d = self._request(parameters)
-        d.addCallback(self._putAttributesCallback)
+        d.addCallback(self._putAttributesCallback, domain, item_name, attributes)
         return d
        
-    def _putAttributesCallback(self, data):
+    def _putAttributesCallback(self, data, domain, item_name, attributes):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        logger.debug("""Put attributes %s on '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
+            attributes,
+            item_name,
+            domain,
+            box_usage))
         return True
    
     def getAttributes(self, domain, item_name, attribute_name=None):
@@ -253,12 +284,17 @@ class AmazonSDB:
         if attribute_name is not None:
             parameters["AttributeName"] = attribute_name
         d = self._request(parameters)
-        d.addCallback(self._getAttributesCallback)
+        d.addCallback(self._getAttributesCallback, domain, item_name)
         return d
        
-    def _getAttributesCallback(self, data):
+    def _getAttributesCallback(self, data, domain, item_name):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        logger.debug("""Got attributes from '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
+            item_name,
+            domain,
+            box_usage))
         xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         attributes = {}
         if xml_response["GetAttributesResult"][0] is None:
@@ -313,12 +349,17 @@ class AmazonSDB:
                 parameters["Attribute.%s.Name" % attr_count] = key
                 attr_count += 1
         d = self._request(parameters)
-        d.addCallback(self._deleteAttributesCallback)
+        d.addCallback(self._deleteAttributesCallback, domain, item_name)
         return d
 
-    def _deleteAttributesCallback(self, data):
+    def _deleteAttributesCallback(self, data, domain, item_name):
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        logger.debug("""Deleted attributes from '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
+            item_name,
+            domain,
+            box_usage))
         return True
    
     def select(self, select_expression):
@@ -331,7 +372,8 @@ class AmazonSDB:
         return self._select(select_expression)
        
     def _select(self, select_expression, next_token=None, 
-                previous_results=None):
+                previous_results=None,
+                total_box_usage=0):
         parameters = {}
         parameters["Action"] = "Select"
         parameters["SelectExpression"] = select_expression
@@ -340,17 +382,21 @@ class AmazonSDB:
         d = self._request(parameters)
         d.addCallback(self._selectCallback, 
                       select_expression=select_expression,
-                      previous_results=previous_results)
+                      previous_results=previous_results,
+                      total_box_usage=total_box_usage)
         return d
 
     def _selectCallback(self, data, select_expression=None, 
-                        previous_results=None):
+                        previous_results=None,
+                        total_box_usage=0):
         if previous_results is not None:
             results = previous_results
         else:
             results = {}
         xml = ET.fromstring(data["response"])
-        self.box_usage += float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        total_box_usage += box_usage
         next_token_element = xml.find(".//%sNextToken" % SDB_NAMESPACE)
         if next_token_element is not None:
             next_token = next_token_element.text
@@ -372,7 +418,11 @@ class AmazonSDB:
             results[key] = attribute_dict
         if next_token is not None:
             return self._select(select_expression, next_token=next_token,
-                                previous_results=results)
+                                previous_results=results,
+                                total_box_usage=total_box_usage)
+        logger.debug("""Select:\n'%s'\nBox usage: %s""" % (
+            select_expression,
+            total_box_usage))
         return results       
 
     def _request(self, parameters):
