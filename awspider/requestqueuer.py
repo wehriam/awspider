@@ -194,9 +194,6 @@ class RequestQueuer(object):
     def _hostRequestCheck(self, host):
         if host not in self.pending_reqs:
             return False
-        if len(self.pending_reqs[host]) == 0:
-            del self.pending_reqs[host]
-            return False
         if host in self.last_req:
             if host in self.min_req_interval_per_hosts:
                 if time.time() - self.last_req[host] < \
@@ -223,8 +220,12 @@ class RequestQueuer(object):
             hosts = self.pending_reqs.keys()
             for host in hosts:
                 if self._hostRequestCheck(host):
+                    if len(self.pending_reqs[host]) == 0:
+                        del self.pending_reqs[host]
+                        continue
+                    else:
+                        req = self.pending_reqs[host].pop(0)
                     in_loop_req_count += 1
-                    req = self.pending_reqs[host].pop(0)
                     d = self._getPage(req)
                     d.addCallback(self._requestComplete, req["deferred"], host)
                     d.addErrback(self._requestError, req["deferred"], host)
