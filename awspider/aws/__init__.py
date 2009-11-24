@@ -3,9 +3,7 @@ Twisted API for Amazon's various web services.
 """
 
 from .s3 import AmazonS3
-
 from .sqs import AmazonSQS
-
 from .sdb import AmazonSDB
 from .sdb import sdb_now
 from .sdb import sdb_now_add

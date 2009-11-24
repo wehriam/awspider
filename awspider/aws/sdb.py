@@ -101,6 +101,30 @@ class AmazonSDB:
         self.rq.setHostMaxRequestsPerSecond(self.host, 0)
         self.rq.setHostMaxSimultaneousRequests(self.host, 0)
 
+    def checkAndCreateDomain(self, domain): 
+        """
+        Check for a SimpleDB domain's existence. If it does not exist, 
+        create it.
+       
+        **Arguments:**
+         * *domain* -- Domain name
+        """   
+        d = self.domainMetadata(domain)
+        d.addErrback(self._checkAndCreateDomainErrback, domain)     
+        return d
+
+    def _checkAndCreateDomainErrback(self, error, domain):
+        if int(error.value.status) == 400:  
+            d = self.createDomain(domain)
+            d.addErrback(self._checkAndCreateDomainErrback2, domain)
+            return d
+        message = "Could not find or create domain '%s'." % domain
+        raise Exception(message)
+
+    def _checkAndCreateDomainErrback2(self, error, domain):
+        message =  "Could not create domain '%s'" % domain
+        raise Exception(message)
+
     def createDomain(self, domain):
         """
         Create a SimpleDB domain.

@@ -42,6 +42,28 @@ class AmazonS3:
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
        
+    def checkAndCreateBucket(self, bucket):
+        """
+        Check for a bucket's existence. If it does not exist, 
+        create it.
+       
+        **Arguments:**
+         * *bucket* -- Bucket name
+        """
+        d = self.getBucket(bucket)
+        d.addErrback(self._checkAndCreateBucketErrback, bucket) 
+        return d
+
+    def _checkAndCreateBucketErrback(self, error, bucket):
+        if int(error.value.status) == 404:    
+            d = self.putBucket(bucket)
+            d.addErrback(self._checkAndCreateBucketErrback2, bucket)
+            return d
+        raise Exception("Could not find or create bucket '%s'." % bucket_name)
+
+    def _checkAndCreateBucketErrback2( self, error, bucket_name):
+        raise Exception("Could not create bucket '%s'" % bucket_name)      
+    
     def emptyBucket(self, bucket):
         """
         Delete all items in a bucket.
@@ -239,6 +261,8 @@ class AmazonS3:
         """
         bucket = convertToUTF8(bucket)
         key = convertToUTF8(key)
+        if not isinstance(data, str):
+            data = convertToUTF8(data)
         if headers is None:
             headers = {}
         # Wrap user-defined headers in with the Amazon custom header prefix.

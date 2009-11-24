@@ -1,7 +1,7 @@
 import hashlib
 import os
 import sys
-sys.path.append(os.path.join( os.path.dirname(__file__), "lib") )
+sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
 
 from twisted.trial import unittest
@@ -18,70 +18,84 @@ class AmazonSDBTestCase(unittest.TestCase):
     
     def setUp(self):
         
-        config_path = os.path.abspath( os.path.join( os.path.dirname(__file__), "config.yaml" ) )
+        config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "config.yaml"))
         
-        if not os.path.isfile( config_path ):
-            self.raiseConfigException( config_path )
+        if not os.path.isfile(config_path):
+            self.raiseConfigException(config_path)
             
-        config = yaml.load( open( config_path, 'r').read() )
+        config = yaml.load(open(config_path, 'r').read())
         
         if not "aws_access_key_id" in config or "aws_secret_access_key" not in config:
-            self.raiseConfigException( config_path )
+            self.raiseConfigException(config_path)
         
-        self.sdb = AmazonSDB( config["aws_access_key_id"], config["aws_secret_access_key"])
+        self.sdb = AmazonSDB(config["aws_access_key_id"], config["aws_secret_access_key"])
         
-        self.uuid = hashlib.sha256( config["aws_access_key_id"] + config["aws_secret_access_key"] + self.__class__.__name__ ).hexdigest()
+        self.uuid = hashlib.sha256(config["aws_access_key_id"] + config["aws_secret_access_key"] + self.__class__.__name__).hexdigest()
         
-    def raiseConfigException( self, filename ):
-        raise Exception("Please create a YAML config file at %s with 'aws_access_key_id' and 'aws_secret_access_key'." % filename )
+    def raiseConfigException(self, filename):
+        raise Exception("Please create a YAML config file at %s with 'aws_access_key_id' and 'aws_secret_access_key'." % filename)
     
     def tearDown(self):
         pass
 
-    def test_01_CreateDomain( self ):
-        d = self.sdb.createDomain( self.uuid )
+    def test_01_CreateDomain(self):
+        d = self.sdb.createDomain(self.uuid)
         return d
         
-    def test_02_ListDomains( self ):
+    def test_02_ListDomains(self):
         d = self.sdb.listDomains()
         return d
 
-    def test_03_DomainMetadata( self ):
-        d = self.sdb.domainMetadata( self.uuid )
+    def test_03_DomainMetadata(self):
+        d = self.sdb.domainMetadata(self.uuid)
         return d
     
     def test_04_PutAttributes(self):
-        d = self.sdb.putAttributes( self.uuid, "test", {"a":[1,3], "b":2} )
+        d = self.sdb.putAttributes(self.uuid, "test", {"a":[1,3], "b":2})
         return d
 
     def test_05_GetAttributes(self):
-        d = self.sdb.getAttributes( self.uuid, "test")
+        d = self.sdb.getAttributes(self.uuid, "test")
         return d  
     
     def test_05a_GetAttributes_Individual(self):
-        d = self.sdb.getAttributes( self.uuid, "test", "a" )
+        d = self.sdb.getAttributes(self.uuid, "test", "a")
         return d 
  
     def test_06_Select(self):
-        d = self.sdb.select( "SELECT * FROM `%s` WHERE `a`='1'" % self.uuid )
+        d = self.sdb.select("SELECT * FROM `%s` WHERE `a`='1'" % self.uuid)
         return d
     
     def test_07_Query(self):
         raise unittest.SkipTest("Not implemented.")
     
     def test_08_DeleteAttributes_NameAndValue(self):
-        d = self.sdb.deleteAttributes( self.uuid, "test", {"a":1} )
+        d = self.sdb.deleteAttributes(self.uuid, "test", {"a":1})
         return d
 
     def test_08a_DeleteAttributes_Name(self):
-        d = self.sdb.deleteAttributes( self.uuid, "test", ["a"] )
+        d = self.sdb.deleteAttributes(self.uuid, "test", ["a"])
         return d    
     
     def test_09_Delete(self):
-        d = self.sdb.delete( self.uuid, "test" )
+        d = self.sdb.delete(self.uuid, "test")
         return d
     
     def test_10_DeleteDomain(self):
-        d = self.sdb.deleteDomain( self.uuid )
+        d = self.sdb.deleteDomain(self.uuid)
         return d
         
+    def test_11_CheckAndCreateDomain(self):
+        d = self.sdb.checkAndCreateDomain(self.uuid)
+        d.addCallback(self._checkAndCreateDomainCallback)
+        return d
+        
+    def _checkAndCreateDomainCallback(self, data):
+        d = self.sdb.checkAndCreateDomain(self.uuid)
+        d.addCallback(self._checkAndCreateDomainCallback2)
+        return d
+    
+    def _checkAndCreateDomainCallback2(self, data):
+        d = self.sdb.deleteDomain(self.uuid)
+        return d        
+    

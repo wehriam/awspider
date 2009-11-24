@@ -46,14 +46,23 @@ class RequestQueuer(object):
             ``setHostMaxSimultaneousRequests()`` (Default 5)
   
         """
-        self.max_simul_reqs = int(max_simultaneous_requests)
+        if max_requests_per_host_per_second == 0:
+            self.max_simul_reqs = 100000
+        else:
+            self.max_simul_reqs = int(max_simultaneous_requests)
         # self.min_req_interval_per_host is the global minimum request
         # interval. Can be overridden by self.min_req_interval_per_hosts[].
-        max_req_per_host_per_sec = float(max_requests_per_host_per_second)
-        self.min_req_interval_per_host = 1.0 / max_req_per_host_per_sec
+        if max_requests_per_host_per_second == 0:
+            self.min_req_interval_per_host = 0
+        else:
+            max_req_per_host_per_sec = float(max_requests_per_host_per_second)
+            self.min_req_interval_per_host = 1.0 / max_req_per_host_per_sec
         # self.max_simul_reqs_per_host is the global maximum simultaneous 
         # request count. Can be overridden by self.max_simul_reqs_per_hosts[].
-        self.max_simul_reqs_per_host = int(max_simultaneous_requests_per_host)
+        if max_simultaneous_requests_per_host == 0:
+            self.max_simul_reqs_per_host = self.max_simul_reqs
+        else:
+            self.max_simul_reqs_per_host = int(max_simultaneous_requests_per_host)
 
     def getPending(self):
         """

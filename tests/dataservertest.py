@@ -1,0 +1,109 @@
+import os
+import hashlib
+from twisted.internet.defer import DeferredList
+from twisted.trial import unittest
+import yaml
+from awspider.servers import AWSpiderDataServer
+from awspider.aws import AmazonS3
+
+class AWSpiderDataServerStartTestCase(unittest.TestCase):
+    
+    def setUp(self):
+        config_path = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "config.yaml"))
+        if not os.path.isfile(config_path):
+            self.raiseConfigException(config_path)
+        config = yaml.load(open(config_path, 'r').read())
+        if not "aws_access_key_id" in config or "aws_secret_access_key" not in config:
+            self.raiseConfigException(config_path)
+        self.uuid = hashlib.sha256("%s%s%s" % (
+            config["aws_access_key_id"],
+            config["aws_secret_access_key"], 
+            self.__class__.__name__)).hexdigest()
+        self.aws_access_key_id = config["aws_access_key_id"]
+        self.aws_secret_access_key = config["aws_secret_access_key"]
+        self.aws_s3_storage_bucket = "%s_storage" % self.uuid
+        self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
+        self.dataserver = AWSpiderDataServer( 
+            aws_access_key_id = self.aws_access_key_id, 
+            aws_secret_access_key = self.aws_secret_access_key,
+            aws_s3_storage_bucket = self.aws_s3_storage_bucket, 
+            aws_sdb_reservation_domain = self.aws_sdb_reservation_domain, 
+            port = 5001
+        )
+    
+    def tearDown(self):
+        deferreds = []        
+        deferreds.append(self.dataserver.clearStorage())  
+        d = DeferredList(deferreds)
+        d.addCallback(self._tearDownCallback)
+        return d
+
+    def _tearDownCallback(self, data):
+        s3 = AmazonS3(self.aws_access_key_id, self.aws_secret_access_key)
+        deferreds = []        
+        deferreds.append(s3.deleteBucket(self.aws_s3_storage_bucket))        
+        d = DeferredList(deferreds)
+        return d
+        
+    def testStart(self):
+        d = self.dataserver.start()
+        d.addCallback(self._startCallback)
+        return d 
+    
+    def _startCallback(self, data):
+        d = self.dataserver.shutdown()
+        return d
+
+class AWSpiderDataServerTestCase(unittest.TestCase):
+
+    def setUp(self):
+        config_path = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "config.yaml"))
+        if not os.path.isfile(config_path):
+            self.raiseConfigException(config_path)
+        config = yaml.load(open(config_path, 'r').read())
+        if not "aws_access_key_id" in config or "aws_secret_access_key" not in config:
+            self.raiseConfigException(config_path)
+        self.uuid = hashlib.sha256("%s%s%s" % (
+            config["aws_access_key_id"],
+            config["aws_secret_access_key"], 
+            self.__class__.__name__)).hexdigest()
+        self.aws_access_key_id = config["aws_access_key_id"]
+        self.aws_secret_access_key = config["aws_secret_access_key"]
+        self.aws_s3_storage_bucket = "%s_storage" % self.uuid
+        self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
+        self.dataserver = AWSpiderDataServer( 
+            aws_access_key_id = self.aws_access_key_id, 
+            aws_secret_access_key = self.aws_secret_access_key,
+            aws_s3_storage_bucket = self.aws_s3_storage_bucket, 
+            aws_sdb_reservation_domain = self.aws_sdb_reservation_domain,
+            port = 5001
+        )
+        return self.dataserver.start()
+    
+    def tearDown(self):
+        deferreds = []  
+        deferreds.append(self.dataserver.shutdown())
+        d = DeferredList(deferreds)
+        d.addCallback(self._tearDownCallback)
+        return d
+        
+    def _tearDownCallback(self, data):
+        deferreds = []        
+        deferreds.append(self.dataserver.clearStorage())  
+        d = DeferredList(deferreds)
+        d.addCallback(self._tearDownCallback2)
+        return d
+
+    def _tearDownCallback2(self, data):
+        s3 = AmazonS3(self.aws_access_key_id, self.aws_secret_access_key)
+        deferreds = []        
+        deferreds.append(s3.deleteBucket(self.aws_s3_storage_bucket))        
+        d = DeferredList(deferreds)
+        return d
+
+    def test_01_clearStorage(self):
+        d = self.dataserver.clearStorage()
+        return d 
+

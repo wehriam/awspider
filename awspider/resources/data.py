@@ -37,7 +37,6 @@ class DataResource(Resource):
                     d.addCallback(self._successResponse)
                     d.addErrback(self._errorResponse)
                     d.addCallback(self._immediateResponse, request)
-                    
                     return server.NOT_DONE_YET
                 else:
                     return self._errorResponse(Failure(exc_value=Exception("Parameter UUID is required.")))

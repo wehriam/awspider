@@ -1,13 +1,10 @@
 from unicodeconverter import convertToUnicode
 
-def evaluateBoolean( b ):
-    
+def evaluateBoolean(b):
     if isinstance(b, bool):
         return b
-    
     if isinstance(b, str):
         b = convertToUnicode(b)
-    
     if isinstance(b, unicode):
         if b.lower() == u"false":
             return False
@@ -19,12 +16,12 @@ def evaluateBoolean( b ):
             return True
         else:
             try:
-                return bool( int(b) )
+                return bool(int(b))
             except:
                 return True
     else:
         try:
-            return bool( int(b) )
+            return bool(int(b))
         except:
             return True
             

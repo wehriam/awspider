@@ -475,15 +475,15 @@ class AWSpider:
         
         # Make sure the specified S3 cache bucket works.
         
-        deferreds.append( self._checkAndCreateS3Bucket( self.aws_s3_cache_bucket ) )
+        deferreds.append( self.s3.checkAndCreateBucket(self.aws_s3_cache_bucket))
 
         if self.aws_s3_storage_bucket is not None:
-            deferreds.append( self._checkAndCreateS3Bucket( self.aws_s3_storage_bucket ) )
+            deferreds.append( self.s3.checkAndCreateBucket(self.aws_s3_storage_bucket))
 
-        deferreds.append( self._checkAndCreateSDBDomain( self.aws_sdb_reservation_domain ) )    
+        deferreds.append( self.sdb.checkAndCreateDomain(self.aws_sdb_reservation_domain))    
 
         if self.aws_sdb_coordination_domain is not None:
-            deferreds.append( self._checkAndCreateSDBDomain( self.aws_sdb_coordination_domain ) )
+            deferreds.append( self.sdb.checkAndCreateDomain(self.aws_sdb_coordination_domain))
             deferreds.append( self.getNetworkAddress() )
         
         if self.time_offset is None:
@@ -559,49 +559,6 @@ class AWSpider:
             message = "Could not get time offset for sync."
             logger.critical( message )
             raise Exception( message )
-    
-    def _checkAndCreateS3Bucket( self, bucket_name ):
-        d = self.s3.getBucket( bucket_name )
-        d.addErrback( self._checkAndCreateS3BucketErrback, bucket_name ) 
-        return d
-        
-    def _checkAndCreateS3BucketErrback( self, error, bucket_name ):
-        if int(error.value.status) == 404:
-            logger.info( "Bucket %s does not exist, creating." % bucket_name )     
-            d = self.s3.putBucket( bucket_name )
-            d.addErrback( self._checkAndCreateS3BucketErrback2, bucket_name )
-            return d
-        
-        message = "Could not find or create S3 bucket '%s'." % bucket_name
-        logger.critical( message )
-        raise Exception( message )
-        
-    def _checkAndCreateS3BucketErrback2( self, error, bucket_name ):
-        message = "Could not create S3 bucket '%s'" % bucket_name
-        logger.critical( message )
-        raise Exception( message )
-
-    def _checkAndCreateSDBDomain( self, domain_name ):    
-        d = self.sdb.domainMetadata( domain_name )
-        d.addErrback( self._checkAndCreateSDBDomainErrback, domain_name )     
-        return d
-
-    def _checkAndCreateSDBDomainErrback( self, error, domain_name ):
-        
-        if int(error.value.status) == 400:  
-            logger.info( "Domain %s does not exist, creating." % domain_name )
-            d = self.sdb.createDomain( domain_name  )
-            d.addErrback( self._checkAndCreateSDBDomainErrback2, domain_name )
-            return d
-            
-        message = "Could not find or create SDB domain '%s'." % domain_name
-        logger.critical( message )
-        raise Exception( message )
-        
-    def _checkAndCreateSDBDomainErrback2( self, error, domain_name ):
-        message =  "Could not create SDB domain '%s'" % domain_name
-        logger.critical( message )
-        raise Exception( message )
     
     def pause(self):
         logger.critical( "Pausing Spider." )
@@ -1076,4 +1033,5 @@ class AWSpider:
         logger.debug( "Verified public IP for %s" % uuid )
         self.peers[ uuid ]["public_ip"] = public_ip
         
-
+    def memoize(self, func):
+        pass
