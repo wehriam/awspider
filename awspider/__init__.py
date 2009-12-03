@@ -225,7 +225,8 @@ class AWSpider:
             "active_requests_by_host":active_requests_by_host,
             "pending_requests_by_host":pending_requests_by_host,
             "active_requests":self.rq.getActive(),
-            "pending_requests":self.rq.getPending()
+            "pending_requests":self.rq.getPending(),
+            "current_timestamp":sdb_now(offset=self.time_offset)
         }
         
         logger.debug("Got server data:\n%s" % PrettyPrinter.pformat(data) )

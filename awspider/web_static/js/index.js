@@ -124,6 +124,9 @@ data_server_callback = function( data ) {
 		}
 		$("#running_time").html(message).fadeIn()
 	}
+	if(typeof data["current_timestamp"] != "undefined") {
+		$("#current_timestamp").html(data["current_timestamp"]).fadeIn()
+	}
 	if(typeof data["paused"] != "undefined") {
 		if( data["paused"] ) {
 			pause()

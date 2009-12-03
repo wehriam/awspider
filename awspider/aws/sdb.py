@@ -7,6 +7,7 @@ from datetime import datetime
 import time
 import dateutil.parser
 import logging
+from twisted.internet.defer import DeferredList
 from ..pagegetter import RequestQueuer
 from .lib import etree_to_dict, safe_quote_tuple
 
@@ -101,6 +102,95 @@ class AmazonSDB:
         self.rq.setHostMaxRequestsPerSecond(self.host, 0)
         self.rq.setHostMaxSimultaneousRequests(self.host, 0)
 
+    def copyDomain(self, source_domain, destination_domain):
+        """
+        Copy all elements of a source domain to a destination domain.
+       
+        **Arguments:**
+         * *source_domain* -- Source domain name
+         * *destination_domain* -- Destination domain name
+        """
+        d = self.checkAndCreateDomain(destination_domain)
+        d.addCallback(self._copyDomainCallback, source_domain, 
+            destination_domain)
+        return d
+    
+    def _copyDomainCallback(self, data, source_domain, destination_domain):
+        return self._copyDomainCallback2(source_domain, destination_domain)
+    
+    def _copyDomainCallback2(self, source_domain, destination_domain, 
+        next_token=None, total_box_usage=0):
+        parameters = {}
+        parameters["Action"] = "Select"
+        parameters["SelectExpression"] = "SELECT * FROM `%s`" % source_domain
+        if next_token is not None:
+            parameters["NextToken"] = next_token
+        d = self._request(parameters)
+        d.addCallback(self._copyDomainCallback3, 
+                      source_domain=source_domain,
+                      destination_domain=destination_domain,
+                      total_box_usage=total_box_usage)
+        return d
+
+    def _copyDomainCallback3(self, data, source_domain, destination_domain,
+        total_box_usage=0):
+        xml = ET.fromstring(data["response"])
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        total_box_usage += box_usage
+        next_token_element = xml.find(".//%sNextToken" % SDB_NAMESPACE)
+        if next_token_element is not None:
+            next_token = next_token_element.text
+        else:
+            next_token = None
+        items = xml.findall(".//%sItem" % SDB_NAMESPACE)
+        results = {}
+        for item in items:
+            key = item.find("./%sName" % SDB_NAMESPACE).text
+            attributes = item.findall("%sAttribute" % SDB_NAMESPACE)
+            attribute_dict = {}
+            for attribute in attributes:
+                attr_name = attribute.find("./%sName" % SDB_NAMESPACE).text
+                attr_value = attribute.find("./%sValue" % SDB_NAMESPACE).text
+                if attr_name in attribute_dict:  
+                    attribute_dict[attr_name].append(attr_value)
+                else:
+                    attribute_dict[attr_name] = [attr_value]
+            results[key] = attribute_dict
+        deferreds = []
+        for key in results:
+            d = self.putAttributes(destination_domain, key, results[key])
+            d.addErrback(self._copyPutAttributesErrback, destination_domain, key, results[key])
+            deferreds.append(d)
+        d = DeferredList(deferreds, consumeErrors=True)
+        d.addCallback(self._copyDomainCallback4, source_domain,
+            destination_domain, next_token=next_token, total_box_usage=total_box_usage)
+        return d
+        
+    def _copyDomainCallback4(self, data, source_domain, destination_domain,
+        next_token=None, total_box_usage=0):
+        for row in data:
+            if row[0] == False:
+                raise row[1]
+        if next_token is not None:
+            return self._copyDomainCallback2(
+                source_domain=source_domain,
+                destination_domain=destination_domain,
+                next_token=next_token,
+                total_box_usage=total_box_usage)
+        logger.debug("""CopyDomain:\n%s -> %s\nBox usage: %s""" % (
+            source_domain,
+            destination_domain,
+            total_box_usage))
+        return True
+    
+    def _copyPutAttributesErrback(self, error, destination_domain, key, attributes, count=0):
+        if count < 3:
+            d = self.putAttributes(destination_domain, key, attributes)
+            d.addErrback(self._copyPutAttributesErrback, destination_domain, key, attributes, count=count + 1)
+            return d
+        return error
+            
     def checkAndCreateDomain(self, domain): 
         """
         Check for a SimpleDB domain's existence. If it does not exist, 

@@ -55,4 +55,6 @@ class AWSpiderPlugin(object):
                     name=CALLABLE_FUNCTIONS[instance_id]["name"])
             if instance_id in MEMOIZED_FUNCTIONS:
                 self.spider.memoize(instance_method[1])
-                   
+                
+    def getPage(self, *args, **kwargs):
+        return self.spider.getPage(*args, **kwargs)

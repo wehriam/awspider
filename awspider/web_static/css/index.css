@@ -29,3 +29,6 @@
 #request_data td {
     text-align:left;
 }
+#current_timestamp {
+	display:none;
+}
