@@ -1,10 +1,11 @@
 from twisted.internet.defer import Deferred, DeferredList
 from twisted.web import server
 from twisted.internet import reactor
-from .base import AWSpiderBaseServer, LOGGER
+from .base import BaseServer, LOGGER
 from ..resources2 import DataResource
 
-class AWSpiderDataServer(AWSpiderBaseServer):
+
+class DataServer(BaseServer):
     
     def __init__(self,
                  aws_access_key_id, 
@@ -21,7 +22,7 @@ class AWSpiderDataServer(AWSpiderBaseServer):
             name = "AWSpider Data Server UUID: %s" % self.uuid
         resource = DataResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
-        AWSpiderBaseServer.__init__(
+        BaseServer.__init__(
             self,
             aws_access_key_id, 
             aws_secret_access_key,
@@ -66,4 +67,4 @@ class AWSpiderDataServer(AWSpiderBaseServer):
             return self._shutdownCallback(None)
 
     def _shutdownCallback(self, data):
-        return AWSpiderBaseServer.shutdown(self)
+        return BaseServer.shutdown(self)

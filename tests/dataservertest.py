@@ -3,10 +3,10 @@ import hashlib
 from twisted.internet.defer import DeferredList
 from twisted.trial import unittest
 import yaml
-from awspider.servers import AWSpiderDataServer
+from awspider.servers import DataServer
 from awspider.aws import AmazonS3
 
-class AWSpiderDataServerStartTestCase(unittest.TestCase):
+class DataServerStartTestCase(unittest.TestCase):
     
     def setUp(self):
         config_path = os.path.abspath(os.path.join(
@@ -24,7 +24,7 @@ class AWSpiderDataServerStartTestCase(unittest.TestCase):
         self.aws_secret_access_key = config["aws_secret_access_key"]
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
-        self.dataserver = AWSpiderDataServer( 
+        self.dataserver = DataServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
             aws_s3_storage_bucket = self.aws_s3_storage_bucket, 
@@ -55,7 +55,7 @@ class AWSpiderDataServerStartTestCase(unittest.TestCase):
         d = self.dataserver.shutdown()
         return d
 
-class AWSpiderDataServerTestCase(unittest.TestCase):
+class DataServerTestCase(unittest.TestCase):
 
     def setUp(self):
         config_path = os.path.abspath(os.path.join(
@@ -73,7 +73,7 @@ class AWSpiderDataServerTestCase(unittest.TestCase):
         self.aws_secret_access_key = config["aws_secret_access_key"]
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
-        self.dataserver = AWSpiderDataServer( 
+        self.dataserver = DataServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
             aws_s3_storage_bucket = self.aws_s3_storage_bucket, 

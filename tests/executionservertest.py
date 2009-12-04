@@ -3,10 +3,10 @@ import hashlib
 from twisted.internet.defer import DeferredList
 from twisted.trial import unittest
 import yaml
-from awspider.servers.execution import AWSpiderExecutionServer
+from awspider.servers import ExecutionServer
 from awspider.aws import AmazonS3, AmazonSDB
 
-class AWSpiderExecutionServerStartTestCase(unittest.TestCase):
+class ExecutionServerStartTestCase(unittest.TestCase):
     
     def setUp(self):
         config_path = os.path.abspath(os.path.join(
@@ -26,7 +26,7 @@ class AWSpiderExecutionServerStartTestCase(unittest.TestCase):
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
         self.aws_sdb_coordination_domain = "%s_coordination" % self.uuid
-        self.executionserver = AWSpiderExecutionServer( 
+        self.executionserver = ExecutionServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
             aws_s3_cache_bucket = "%s_cache" % self.uuid,
@@ -74,7 +74,7 @@ class AWSpiderDataExecutionTestCase(unittest.TestCase):
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
         self.aws_sdb_coordination_domain = "%s_coordination" % self.uuid
-        self.executionserver = AWSpiderExecutionServer( 
+        self.executionserver = ExecutionServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
             aws_s3_cache_bucket = "%s_cache" % self.uuid,

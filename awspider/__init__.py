@@ -96,6 +96,7 @@ class AWSpider:
     shutdown_trigger_id = None
     
     logging_handler = None
+    job_limit = 500
     
     def __init__( self, 
                 aws_access_key_id, 
@@ -642,16 +643,16 @@ class AWSpider:
         d.addErrback( self._queryErrback )        
         return d
         
-    def query( self ):
+    def query( self, data=None ):
         
         sql = """SELECT itemName() 
                 FROM `%s` 
                 WHERE
                 reservation_next_request < '%s' 
-                
-                """ % (self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset))
+                LIMIT %s
+                """ % (self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset), self.job_limit)
         #INTERSECTION reservation_error != '1'
-        #logger.debug( "Querying SimpleDB, \"%s\"" % sql )
+        logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         
         d = self.sdb.select( sql )
         d.addCallback( self._queryCallback )
@@ -661,6 +662,7 @@ class AWSpider:
         logger.error( "Unable to query SimpleDB.\n%s" % error )
         
     def _queryCallback(self, data):
+        deferreds = []
         keys = data.keys()
         if len(keys) > 0:
             i = 0
@@ -675,7 +677,11 @@ class AWSpider:
                 d = self.sdb.select(sql)
                 d.addCallback(self._queryCallback2)
                 d.addErrback(self._queryErrback)
-        
+        if len(keys) >= (self.job_limit-10) and len(deferreds) > 0:
+            LOGGER.debug("Job limit reached. Querying again.")
+            d = DeferredList(deferreds, consumeErrors=True)
+            d.addCallback(self.query)
+            
     def _queryCallback2(self, data):
         for uuid in data:
             
@@ -742,8 +748,9 @@ class AWSpider:
                 self.setReservationError( uuid )
                 continue
             
-            reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
-
+            #reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
+            self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
+            
     def callExposedFunction( self, func, kwargs, function_name, uuid ):
         
         logger.debug( "Calling %s, %s." % (function_name, uuid) )

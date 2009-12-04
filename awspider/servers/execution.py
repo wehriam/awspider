@@ -1,19 +1,29 @@
 import cPickle
+import time
+import pprint
 from twisted.internet.defer import Deferred, DeferredList
 from twisted.internet import task
 from twisted.internet import reactor
 from twisted.web import server
-from .base import AWSpiderBaseServer, LOGGER
+from .base import BaseServer, LOGGER
 from ..aws import sdb_now, sdb_now_add
 from ..resources2 import ExecutionResource
 
+PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
-class AWSpiderExecutionServer(AWSpiderBaseServer):
+class ExecutionServer(BaseServer):
     
     peers = {}
     peer_uuids = []
     queryloop = None
     coordinateloop = None
+    reserved_arguments = [
+        "reservation_function_name", 
+        "reservation_created", 
+        "reservation_next_request", 
+        "reservation_error"]
+    functions = {}    
+    job_limit = 1000
     
     def __init__(self,
                  aws_access_key_id, 
@@ -41,7 +51,7 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
         self.reservation_check_interval = int(reservation_check_interval)
         resource = ExecutionResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
-        AWSpiderBaseServer.__init__(
+        BaseServer.__init__(
             self,
             aws_access_key_id, 
             aws_secret_access_key, 
@@ -77,7 +87,7 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
                 d = self.shutdown()
                 d.addCallback(self._startHandleError, row[1])
                 return d
-        d = AWSpiderBaseServer.start(self)   
+        d = BaseServer.start(self)   
         d.addCallback(self._startCallback2)
 
     def _startCallback2(self, data):
@@ -119,7 +129,7 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
             return self._shutdownCallback(None)
     
     def _shutdownCallback(self, data):
-        return AWSpiderBaseServer.shutdown(self)
+        return BaseServer.shutdown(self)
 
     def peerCheckRequest(self, data=None):
         LOGGER.debug("Signaling peers.")
@@ -127,7 +137,7 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
         for uuid in self.peers:
             if uuid != self.uuid:
                 LOGGER.debug("Signaling %s to check peers." % self.peers[uuid]["uri"])
-                d = self.rq.getPage(self.peers[uuid]["uri"] + "/check")
+                d = self.rq.getPage(self.peers[uuid]["uri"] + "/coordinate")
                 d.addCallback(self._peerCheckRequestCallback, self.peers[uuid]["uri"])
                 deferreds.append(d)
         if len(deferreds) > 0:
@@ -136,7 +146,7 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
         return True
 
     def _peerCheckRequestCallback(self, data, uri):
-        LOGGER.debug("Got %s/check." % uri)
+        LOGGER.debug("Got %s/coordinate." % uri)
 
     def coordinate(self):
         attributes = {"created":sdb_now(offset=self.time_offset)}
@@ -225,13 +235,13 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
         self.peers[uuid]["port"] = port
         if "local_ip" in peer:
             local_ip = peer["local_ip"][0]
-            local_url = "http://%s:%s/data/server" % (local_ip, port)
+            local_url = "http://%s:%s/server" % (local_ip, port)
             d = self.pg.getPage(local_url, timeout=5, cache=-1)
             d.addCallback(self._verifyPeerLocalIPCallback, uuid, local_ip, port)
             deferreds.append( d )
         if "public_ip" in peer:
             public_ip = peer["public_ip"][0]
-            public_url = "http://%s:%s/data/server" % (public_ip, port)
+            public_url = "http://%s:%s/server" % (public_ip, port)
             d = self.pg.getPage(public_url, timeout=5, cache=-1)         
             d.addCallback(self._verifyPeerPublicIPCallback, uuid, public_ip, port)
             deferreds.append(d)
@@ -254,8 +264,9 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
             return self.pg.getPage(*args, **kwargs)
         else:
             scheme, host, port, path = _parse(args[0])
-            peer_uuid = self.peer_uuids[int( uuid5(NAMESPACE_DNS, host).int % len(self.peer_uuids))]
-            if peer_uuid == self.uuid or self.peers[peer_uuid ]["active"] == False:
+            peer_key = int(uuid5(NAMESPACE_DNS, host).int % len(self.peer_uuids))
+            peer_uuid = self.peer_uuids[peer_key]
+            if peer_uuid == self.uuid or self.peers[peer_uuid]["active"] == False:
                 return self.pg.getPage(*args, **kwargs)
             else:
                 parameters = {}
@@ -280,20 +291,150 @@ class AWSpiderExecutionServer(AWSpiderBaseServer):
                     parameters["cache"] = kwargs["cache"]
                 if "prioritize" in kwargs: 
                     parameters["prioritize"] = kwargs["prioritize"]
-                url = "%s/getpage?%s" % (self.peers[peer_uuid]["uri"], urllib.urlencode(parameters))
+                url = "%s/getpage?%s" % (
+                    self.peers[peer_uuid]["uri"], 
+                    urllib.urlencode(parameters))
                 LOGGER.debug("Re-routing request for %s to %s" % (args[0], url))
                 d = self.rq.getPage(url)
-                d.addErrback( self._getPageErrback, args, kwargs ) 
+                d.addErrback(self._getPageErrback, args, kwargs) 
                 return d
 
     def _getPageErrback( self, error, args, kwargs ):
         LOGGER.error( args[0] + ":" + str(error) )
         return self.pg.getPage(*args, **kwargs)
 
-    def query(self):
-        print "Querying!"
-    
-        
-    
+    def getServerData(self):    
+        running_time = time.time() - self.start_time
+        cost = (self.sdb.box_usage * .14) * (60*60*24*30.4) / (running_time)
+        active_requests_by_host = self.rq.getActiveRequestsByHost()
+        pending_requests_by_host = self.rq.getPendingRequestsByHost()
+        data = {
+            "running_time":running_time,
+            "cost":cost,
+            "active_requests_by_host":active_requests_by_host,
+            "pending_requests_by_host":pending_requests_by_host,
+            "active_requests":self.rq.getActive(),
+            "pending_requests":self.rq.getPending(),
+            "current_timestamp":sdb_now(offset=self.time_offset)
+        }
+        LOGGER.debug("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
+        return data
+
+    def query(self, data=None):
+        sql = """SELECT itemName() 
+                FROM `%s` 
+                WHERE
+                reservation_next_request < '%s'
+                LIMIT %s""" % (    
+                self.aws_sdb_reservation_domain, 
+                sdb_now(offset=self.time_offset),
+                self.job_limit)
+        LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
+        d = self.sdb.select(sql)
+        d.addCallback(self._queryCallback)
+        d.addErrback(self._queryErrback)
+
+    def _queryErrback(self, error):
+        LOGGER.error("Unable to query SimpleDB.\n%s" % error)
+
+    def _queryCallback(self, data):
+        deferreds = []
+        keys = data.keys()
+        if len(keys) > 0:
+            i = 0
+            while i * 20 < len(keys):
+                key_subset = keys[i*20:(i+1)*20]
+                i += 1
+                sql = """SELECT *
+                        FROM `%s` 
+                        WHERE
+                        itemName() in('%s')
+                        """ % (
+                        self.aws_sdb_reservation_domain, 
+                        "','".join(key_subset))
+                LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
+                d = self.sdb.select(sql)
+                d.addCallback(self._queryCallback2)
+                d.addErrback(self._queryErrback)
+                deferreds.append(d)
+        if len(keys) >= self.job_limit and len(deferreds) > 0:
+            LOGGER.debug("Job limit reached. Querying again.")
+            d = DeferredList(deferreds, consumeErrors=True)
+            d.addCallback(self.query)
+    def _queryCallback2(self, data):
+        # Iterate through the reservation data returned from SimpleDB
+        for uuid in data:
+            kwargs_raw = {}
+            reserved_arguments = {}
+            # Load attributes into dicts for use by the system or custom functions.
+            for key in data[uuid]:
+                if key in self.reserved_arguments:
+                    reserved_arguments[key] = data[uuid][key][0]
+                else:
+                    kwargs_raw[key] = data[uuid][key][0]
+            # Check for the presence of all required system attributes.
+            if "reservation_function_name" not in reserved_arguments:
+                LOGGER.error("Reservation %s does not have a function name." % uuid)
+                self.deleteReservation(uuid)
+                continue
+            if "reservation_created" not in reserved_arguments:
+                LOGGER.error("Reservation %s, %s does not have a created time." % (function_name, uuid))
+                self.deleteReservation( uuid, function_name=function_name )
+                continue
+            if "reservation_next_request" not in reserved_arguments:
+                LOGGER.error("Reservation %s, %s does not have a next request time." % (function_name, uuid))
+                self.deleteReservation( uuid, function_name=function_name )
+                continue                
+            if "reservation_error" not in reserved_arguments:
+                LOGGER.error("Reservation %s, %s does not have an error flag." % (function_name, uuid))
+                self.deleteReservation( uuid, function_name=function_name )
+                continue
+            # Check to make sure the custom function is present.
+            function_name = reserved_arguments["reservation_function_name"]
+            if function_name not in self.functions:
+                LOGGER.error("Unable to process function %s for UUID: %s" % (function_name, uuid))
+                continue
+            # Load custom function.
+            if function_name in self.functions:
+                exposed_function = self.functions[function_name]
+            else:
+                LOGGER.error("Could not find function %s." % function_name)
+                continue
+            # Check for required / optional arguments.
+            kwargs = {}
+            for key in kwargs_raw:
+                if key in exposed_function["required_arguments"]:
+                    kwargs[key] = kwargs_raw[key]
+                if key in exposed_function["optional_arguments"]:
+                    kwargs[key] = kwargs_raw[key]
+            has_reqiured_arguments = True
+            for key in exposed_function["required_arguments"]:
+                if key not in kwargs:
+                    has_reqiured_arguments = False
+                    LOGGER.error("%s, %s does not have required argument %s." % (function_name, uuid, key))
+            if not has_reqiured_arguments:
+                continue
+            # Call the function.
+            LOGGER.debug("Calling %s with args %s" % (function_name, kwargs))
+            #reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
+            # Schedule the next request.
+#            reservation_next_request_parameters = {
+#                "reservation_next_request":sdb_now_add(
+#                    exposed_function["interval"], 
+#                    offset=self.time_offset)}
+#            d = self.sdb.putAttributes(
+#                self.aws_sdb_reservation_domain, 
+#                uuid, 
+#                reservation_next_request_parameters, 
+#                replace=["reservation_next_request"])
+#            d.addCallback(self._setNextRequestCallback, function_name, uuid)
+#            d.addErrback(self._setNextRequestErrback, function_name, uuid)
+            
+    def _setNextRequestCallback(self, data, function_name, uuid):
+        LOGGER.debug("Set next request for %s, %s on on SimpleDB." % (function_name, uuid))
+
+    def _setNextRequestErrback(self, error, function_name, uuid):
+        LOGGER.error("Unable to set next request for %s, %s on SimpleDB.\n%s" % (function_name, uuid, error.value))
+
 
     

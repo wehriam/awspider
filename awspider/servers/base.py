@@ -12,7 +12,7 @@ from ..networkaddress import getNetworkAddress
 
 LOGGER = logging.getLogger("main")
 
-class AWSpiderBaseServer(object):
+class BaseServer(object):
     
     logging_handler = None
     shutdown_trigger_id = None
@@ -38,7 +38,7 @@ class AWSpiderBaseServer(object):
                  name=None,
                  time_offset=None,
                  port=8080):
-        self.network_information["port"] = port
+        self.port = port
         self.time_offset = time_offset
         self.name = name
         self.start_deferred = Deferred()

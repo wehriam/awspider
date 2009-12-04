@@ -1,2 +1,2 @@
-from .data import AWSpiderDataServer
-from .execution import AWSpiderExecutionServer
+from .data import DataServer
+from .execution import ExecutionServer
