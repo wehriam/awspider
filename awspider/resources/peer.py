@@ -22,7 +22,7 @@ class PeerResource(Resource):
         
         if len(request.postpath) > 0:
             if request.postpath[0] == "check":
-                reactor.callLater( 5, self.spider.checkPeers )
+                reactor.callLater( 5, self.spider.coordinate )
                 return simplejson.dumps( True )  
             if request.postpath[0] == "getpage" and "url" in request.args:
                 #print "Recieving peering request for %s" % request.args["url"][0]

@@ -98,6 +98,8 @@ class AWSpider:
     logging_handler = None
     job_limit = 500
     
+    uuid_limits = {'start':None, 'end':None}
+    
     def __init__( self, 
                 aws_access_key_id, 
                 aws_secret_access_key, 
@@ -116,7 +118,7 @@ class AWSpider:
                 time_offset=None,
                 peer_check_interval=30,
                 reservation_check_interval=30,
-                hammer_prevention=True ):
+                hammer_prevention=False):
         
         self.start_deferred = Deferred()
         
@@ -644,13 +646,21 @@ class AWSpider:
         return d
         
     def query( self, data=None ):
-        
+        if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
+            uuid_limit_clause = "AND itemName() < '%s'" % self.uuid_limits["end"]
+        elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
+            uuid_limit_clause = "AND itemName() > '%s'" % self.uuid_limits["start"]
+        elif self.uuid_limits["start"] is None and self.uuid_limits["end"] is None:
+            uuid_limit_clause = ""
+        else:
+            uuid_limit_clause = "AND itemName() BETWEEN '%s' AND '%s'" % (self.uuid_limits["start"], self.uuid_limits["end"])
         sql = """SELECT itemName() 
                 FROM `%s` 
                 WHERE
-                reservation_next_request < '%s' 
+                reservation_next_request < '%s'
+                %s 
                 LIMIT %s
-                """ % (self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset), self.job_limit)
+                """ % (self.aws_sdb_reservation_domain, sdb_now(offset=self.time_offset), uuid_limit_clause, self.job_limit)
         #INTERSECTION reservation_error != '1'
         logger.debug( "Querying SimpleDB, \"%s\"" % sql )
         
@@ -989,8 +999,19 @@ class AWSpider:
         self.peer_uuids.sort()
         
         logger.debug( "Peers updated to: %s" % self.peers )
+        self._set_uuid_limits()
         # Go through the peers and reorganize the group.
         pass
+    
+    def _set_uuid_limits(self):
+        peer_count = len(self.peers)
+        splits = [hex(4096/peer_count * x)[2:] for x in range(1, peer_count)]
+        splits = zip([None] + splits, splits + [None])
+        splits = [{"start":x[0], "end":x[1]} for x in splits]
+        peer_uuids = self.peers.keys()
+        peer_uuids.sort()
+        self.uuid_limits = splits[peer_uuids.index(self.uuid)]
+        logger.debug( "Updated UUID limits to: %s" % self.uuid_limits)
         
     def _coordinateErrback( self, error ):
         
