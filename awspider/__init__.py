@@ -758,8 +758,8 @@ class AWSpider:
                 self.setReservationError( uuid )
                 continue
             
-            reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
-            #self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
+            #reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
+            self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
             
     def callExposedFunction( self, func, kwargs, function_name, uuid ):
         

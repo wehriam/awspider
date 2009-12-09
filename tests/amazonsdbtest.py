@@ -66,9 +66,6 @@ class AmazonSDBTestCase(unittest.TestCase):
         d = self.sdb.select("SELECT * FROM `%s` WHERE `a`='1'" % self.uuid)
         return d
     
-    def test_07_Query(self):
-        raise unittest.SkipTest("Not implemented.")
-    
     def test_08_DeleteAttributes_NameAndValue(self):
         d = self.sdb.deleteAttributes(self.uuid, "test", {"a":1})
         return d

@@ -218,7 +218,14 @@ class ExecutionServer(BaseServer):
         self.peer_uuids = self.peers.keys()
         self.peer_uuids.sort()
         LOGGER.debug("Peers updated to: %s" % self.peers)
-
+        # Set UUID peer limits by splitting up lexicographical namespace using hex values.
+        peer_count = len(self.peers)
+        splits = [hex(4096/peer_count * x)[2:] for x in range(1, peer_count)]
+        splits = zip([None] + splits, splits + [None])
+        splits = [{"start":x[0], "end":x[1]} for x in splits]
+        self.uuid_limits = splits[self.peer_uuids.index(self.uuid)]
+        LOGGER.debug( "Updated UUID limits to: %s" % self.uuid_limits)
+        
     def _coordinateErrback(self, error):
         LOGGER.error( "Could not query SimpleDB for peers: %s" % str(error) )
 
@@ -321,13 +328,22 @@ class ExecutionServer(BaseServer):
         return data
 
     def query(self, data=None):
+        if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
+            uuid_limit_clause = "AND itemName() < '%s'" % self.uuid_limits["end"]
+        elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
+            uuid_limit_clause = "AND itemName() > '%s'" % self.uuid_limits["start"]
+        elif self.uuid_limits["start"] is None and self.uuid_limits["end"] is None:
+            uuid_limit_clause = ""
+        else:
+            uuid_limit_clause = "AND itemName() BETWEEN '%s' AND '%s'" % (self.uuid_limits["start"], self.uuid_limits["end"])
         sql = """SELECT itemName() 
                 FROM `%s` 
                 WHERE
-                reservation_next_request < '%s'
+                reservation_next_request < '%s' %s
                 LIMIT %s""" % (    
                 self.aws_sdb_reservation_domain, 
                 sdb_now(offset=self.time_offset),
+                uuid_limit_clause,
                 self.job_limit)
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
         d = self.sdb.select(sql)
@@ -361,6 +377,7 @@ class ExecutionServer(BaseServer):
             LOGGER.debug("Job limit reached. Querying again.")
             d = DeferredList(deferreds, consumeErrors=True)
             d.addCallback(self.query)
+            
     def _queryCallback2(self, data):
         # Iterate through the reservation data returned from SimpleDB
         for uuid in data:
