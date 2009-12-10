@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 setup(
 
     name = "AWSpider",
-    version = "0.1.8.2",
+    version = "0.1.8.4",
 
     packages = find_packages(),
 

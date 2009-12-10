@@ -1,6 +1,8 @@
 import cPickle
 import time
 import pprint
+from twisted.web.client import _parse
+from uuid import uuid4, uuid5, NAMESPACE_DNS
 from twisted.internet.defer import Deferred, DeferredList
 from twisted.internet import task
 from twisted.internet import reactor
@@ -8,6 +10,7 @@ from twisted.web import server
 from .base import BaseServer, LOGGER
 from ..aws import sdb_now, sdb_now_add
 from ..resources2 import ExecutionResource
+from ..networkaddress import getNetworkAddress
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
@@ -15,37 +18,42 @@ class ExecutionServer(BaseServer):
     
     peers = {}
     peer_uuids = []
+    reportjobspeedloop = None
+    jobsloop = None
     queryloop = None
-    coordinateloop = None
-    reserved_arguments = [
-        "reservation_function_name", 
-        "reservation_created", 
-        "reservation_next_request", 
-        "reservation_error"]
-    functions = {}    
-    job_limit = 1000
+    coordinateloop = None  
+    uuid_limits = {'start':None, 'end':None}
+    public_ip = None
+    local_ip = None
+    network_information = {}
+    queued_jobs = {}
+    job_queue = []
+    job_count = 0
+    query_start_time = None
+    simultaneous_jobs = 50
     
     def __init__(self,
-                 aws_access_key_id, 
-                 aws_secret_access_key, 
-                 aws_s3_cache_bucket, 
-                 aws_sdb_reservation_domain, 
-                 aws_s3_storage_bucket=None,
-                 aws_sdb_coordination_domain=None,
-                 max_simultaneous_requests=50,
-                 max_requests_per_host_per_second=1,
-                 max_simultaneous_requests_per_host=5,
-                 port=5000, 
-                 log_file='executionserver.log',
-                 log_directory=None,
-                 log_level="debug",
-                 name=None,
-                 time_offset=None,
-                 peer_check_interval=30,
-                 reservation_check_interval=30,
-                 hammer_prevention=True):
+            aws_access_key_id, 
+            aws_secret_access_key, 
+            aws_s3_cache_bucket, 
+            aws_sdb_reservation_domain, 
+            aws_s3_storage_bucket=None,
+            aws_sdb_coordination_domain=None,
+            max_simultaneous_requests=150,
+            max_requests_per_host_per_second=1,
+            max_simultaneous_requests_per_host=5,
+            port=5001, 
+            log_file='executionserver.log',
+            log_directory=None,
+            log_level="debug",
+            name=None,
+            time_offset=None,
+            peer_check_interval=60,
+            reservation_check_interval=60,
+            hammer_prevention=True):
         if name == None:
             name = "AWSpider Execution Server UUID: %s" % self.uuid
+        self.network_information["port"] = port
         self.hammer_prevention = hammer_prevention
         self.peer_check_interval = int(peer_check_interval)
         self.reservation_check_interval = int(reservation_check_interval)
@@ -92,21 +100,36 @@ class ExecutionServer(BaseServer):
 
     def _startCallback2(self, data):
         if self.shutdown_trigger_id is not None:
+            self.reportjobspeedloop = task.LoopingCall(self.reportJobSpeed)
+            self.reportjobspeedloop.start(60)
+            self.jobsloop = task.LoopingCall(self.executeJobs)
+            self.jobsloop.start(1)
             self.queryloop = task.LoopingCall(self.query)
             self.queryloop.start(self.reservation_check_interval)
             if self.aws_sdb_coordination_domain is not None:
                 self.coordinateloop = task.LoopingCall(self.coordinate)
                 self.coordinateloop.start(self.peer_check_interval)  
-                d = self.peerCheckRequest()
-                if isinstance(d, Deferred):
-                    d.addCallback(self._startCallback2)
+                self.peerCheckRequest()
         
     def shutdown(self):
+        LOGGER.critical("Shutting down.")
+        self.job_queue = []
+        self.queued_jobs = {}
         deferreds = []
         LOGGER.debug("%s stopping on main HTTP interface." % self.name)
         d = self.site_port.stopListening()
         if isinstance(d, Deferred):
             deferreds.append(d)
+        if self.reportjobspeedloop is not None:
+            LOGGER.debug("Stopping report job speed loop.")
+            d = self.reportjobspeedloop.stop()
+            if isinstance(d, Deferred):
+                deferreds.append(d)            
+        if self.jobsloop is not None:
+            LOGGER.debug("Stopping jobs loop.")
+            d = self.jobsloop.stop()
+            if isinstance(d, Deferred):
+                deferreds.append(d)           
         if self.queryloop is not None:
             LOGGER.debug("Stopping query loop.")
             d = self.queryloop.stop()
@@ -120,7 +143,7 @@ class ExecutionServer(BaseServer):
             LOGGER.debug( "Removing data from SDB coordination domain.")
             d = self.sdb.delete(self.aws_sdb_coordination_domain, self.uuid )
             d.addCallback(self.peerCheckRequest)
-            deferreds.append( d )
+            deferreds.append(d)
         if len(deferreds) > 0:
             d = DeferredList(deferreds)
             d.addCallback(self._shutdownCallback)
@@ -135,18 +158,41 @@ class ExecutionServer(BaseServer):
         LOGGER.debug("Signaling peers.")
         deferreds = []
         for uuid in self.peers:
-            if uuid != self.uuid:
+            if uuid != self.uuid and self.peers[uuid]["active"]:
                 LOGGER.debug("Signaling %s to check peers." % self.peers[uuid]["uri"])
-                d = self.rq.getPage(self.peers[uuid]["uri"] + "/coordinate")
+                d = self.rq.getPage(self.peers[uuid]["uri"] + "/coordinate", prioritize=True)
                 d.addCallback(self._peerCheckRequestCallback, self.peers[uuid]["uri"])
+                d.addErrback(self, _peerCheckRequestErrback, self.peers[uuid]["uri"])
                 deferreds.append(d)
         if len(deferreds) > 0:
             LOGGER.debug("Combinining shutdown signal deferreds.")
-            return DeferredList(deferreds)
+            return DeferredList(deferreds, consumeErrors=True)
         return True
-
+    
+    def _peerCheckRequestErrback(self, error, uri):
+        LOGGER.debug("Could not get %s/coordinate: %s" % (uri, str(error)))
+        
     def _peerCheckRequestCallback(self, data, uri):
         LOGGER.debug("Got %s/coordinate." % uri)
+
+    def getNetworkAddress(self):
+        d = getNetworkAddress()
+        d.addCallback(self._getNetworkAddressCallback)
+        d.addErrback(self._getNetworkAddressErrback)
+        return d
+
+    def _getNetworkAddressCallback( self, data  ):   
+        if "public_ip" in data:
+            self.public_ip = data["public_ip"]
+            self.network_information["public_ip"] = self.public_ip
+        if "local_ip" in data:
+            self.local_ip = data["local_ip"]  
+            self.network_information["local_ip"] = self.local_ip
+
+    def _getNetworkAddressErrback(self, error):
+        message = "Could not get network address." 
+        LOGGER.error(message)
+        raise Exception(message)
 
     def coordinate(self):
         attributes = {"created":sdb_now(offset=self.time_offset)}
@@ -200,7 +246,7 @@ class ExecutionServer(BaseServer):
         else:
             pass # No old, no new.
 
-    def _coordinateCallback3( self, data ):
+    def _coordinateCallback3(self, data):
         LOGGER.debug( "Re-organizing peers." )
         for uuid in self.peers:
             if "local_ip" in self.peers[uuid]:
@@ -223,7 +269,10 @@ class ExecutionServer(BaseServer):
         splits = [hex(4096/peer_count * x)[2:] for x in range(1, peer_count)]
         splits = zip([None] + splits, splits + [None])
         splits = [{"start":x[0], "end":x[1]} for x in splits]
-        self.uuid_limits = splits[self.peer_uuids.index(self.uuid)]
+        if self.uuid in self.peer_uuids:
+            self.uuid_limits = splits[self.peer_uuids.index(self.uuid)]
+        else:
+            self.uuid_limits = {"start":None, "end":None}
         LOGGER.debug( "Updated UUID limits to: %s" % self.uuid_limits)
         
     def _coordinateErrback(self, error):
@@ -243,13 +292,13 @@ class ExecutionServer(BaseServer):
         if "local_ip" in peer:
             local_ip = peer["local_ip"][0]
             local_url = "http://%s:%s/server" % (local_ip, port)
-            d = self.pg.getPage(local_url, timeout=5, cache=-1)
+            d = self.rq.getPage(local_url, timeout=5, prioritize=True)
             d.addCallback(self._verifyPeerLocalIPCallback, uuid, local_ip, port)
             deferreds.append( d )
         if "public_ip" in peer:
             public_ip = peer["public_ip"][0]
             public_url = "http://%s:%s/server" % (public_ip, port)
-            d = self.pg.getPage(public_url, timeout=5, cache=-1)         
+            d = self.rq.getPage(public_url, timeout=5, prioritize=True)
             d.addCallback(self._verifyPeerPublicIPCallback, uuid, public_ip, port)
             deferreds.append(d)
         if len(deferreds) > 0:
@@ -302,12 +351,12 @@ class ExecutionServer(BaseServer):
                     self.peers[peer_uuid]["uri"], 
                     urllib.urlencode(parameters))
                 LOGGER.debug("Re-routing request for %s to %s" % (args[0], url))
-                d = self.rq.getPage(url)
+                d = self.rq.getPage(url, prioritize=True)
                 d.addErrback(self._getPageErrback, args, kwargs) 
                 return d
 
-    def _getPageErrback( self, error, args, kwargs ):
-        LOGGER.error( args[0] + ":" + str(error) )
+    def _getPageErrback( self, error, args, kwargs):
+        LOGGER.error(args[0] + ":" + str(error))
         return self.pg.getPage(*args, **kwargs)
 
     def getServerData(self):    
@@ -327,6 +376,14 @@ class ExecutionServer(BaseServer):
         LOGGER.debug("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
         return data
 
+    def queryByUUID(self, uuid):
+        sql = "SELECT * FROM `%s` WHERE itemName() = '%s'" % (self.aws_sdb_reservation_domain, uuid)
+        LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
+        d = self.sdb.select(sql)
+        d.addCallback(self._queryCallback2)
+        d.addErrback(self._queryErrback)        
+        return d
+
     def query(self, data=None):
         if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
             uuid_limit_clause = "AND itemName() < '%s'" % self.uuid_limits["end"]
@@ -340,11 +397,10 @@ class ExecutionServer(BaseServer):
                 FROM `%s` 
                 WHERE
                 reservation_next_request < '%s' %s
-                LIMIT %s""" % (    
+                LIMIT 2500""" % (    
                 self.aws_sdb_reservation_domain, 
                 sdb_now(offset=self.time_offset),
-                uuid_limit_clause,
-                self.job_limit)
+                uuid_limit_clause)
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
         d = self.sdb.select(sql)
         d.addCallback(self._queryCallback)
@@ -371,16 +427,20 @@ class ExecutionServer(BaseServer):
                 LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
                 d = self.sdb.select(sql)
                 d.addCallback(self._queryCallback2)
-                d.addErrback(self._queryErrback)
+                d.addErrback(self._queryErrback) 
                 deferreds.append(d)
-        if len(keys) >= self.job_limit and len(deferreds) > 0:
-            LOGGER.debug("Job limit reached. Querying again.")
-            d = DeferredList(deferreds, consumeErrors=True)
-            d.addCallback(self.query)
+            d = DeferredList(deferreds)
+            d.addCallback(self._queryCallback3)
             
+    def _queryCallback3(self, data):
+        self.job_count = 0
+        self.query_start_time = time.time()
+                            
     def _queryCallback2(self, data):
         # Iterate through the reservation data returned from SimpleDB
         for uuid in data:
+            if uuid in self.active_jobs or uuid in self.queued_jobs:
+                continue
             kwargs_raw = {}
             reserved_arguments = {}
             # Load attributes into dicts for use by the system or custom functions.
@@ -431,27 +491,62 @@ class ExecutionServer(BaseServer):
                     LOGGER.error("%s, %s does not have required argument %s." % (function_name, uuid, key))
             if not has_reqiured_arguments:
                 continue
+            self.queued_jobs[uuid] = True
+            self.job_queue.append({
+                "exposed_function":exposed_function,
+                "kwargs":kwargs,
+                "function_name":function_name,
+                "uuid":uuid
+            })
+        self.executeJobs()
+    
+    def reportJobSpeed(self):
+        if self.query_start_time is not None and self.job_count > 0:
+            seconds_per_job = (time.time() - self.query_start_time) / self.job_count
+            LOGGER.critical("Average execution time: %s, %s active." % (seconds_per_job, len(self.active_jobs)))
+        else:
+            LOGGER.critical("No average speed to report yet.")
+            
+    def executeJobs(self, data=None):
+        while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
+            job = self.job_queue.pop(0)
+            exposed_function = job["exposed_function"]
+            kwargs = job["kwargs"]
+            function_name = job["function_name"]
+            uuid = job["uuid"]
+            del self.queued_jobs[uuid]
             # Call the function.
             LOGGER.debug("Calling %s with args %s" % (function_name, kwargs))
-            #reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
             # Schedule the next request.
-#            reservation_next_request_parameters = {
-#                "reservation_next_request":sdb_now_add(
-#                    exposed_function["interval"], 
-#                    offset=self.time_offset)}
-#            d = self.sdb.putAttributes(
-#                self.aws_sdb_reservation_domain, 
-#                uuid, 
-#                reservation_next_request_parameters, 
-#                replace=["reservation_next_request"])
-#            d.addCallback(self._setNextRequestCallback, function_name, uuid)
-#            d.addErrback(self._setNextRequestErrback, function_name, uuid)
+            reservation_next_request_parameters = {
+                "reservation_next_request":sdb_now_add(
+                    exposed_function["interval"], 
+                    offset=self.time_offset)}
+            d = self.sdb.putAttributes(
+                self.aws_sdb_reservation_domain, 
+                uuid, 
+                reservation_next_request_parameters, 
+                replace=["reservation_next_request"])
+            d.addCallback(self._setNextRequestCallback, function_name, uuid)
+            d.addErrback(self._setNextRequestErrback, function_name, uuid)
+            self.active_jobs[uuid] = True
+            d = self.callExposedFunction(
+                exposed_function["function"], 
+                kwargs, 
+                function_name, 
+                uuid)
+            d.addCallback(self._jobCountCallback)
+            d.addErrback(self._jobCountErrback)
             
+    def _jobCountCallback(self, data):
+        self.job_count += 1
+        
+    def _jobCountErrback(self, error):
+        self.job_count += 1
+        
     def _setNextRequestCallback(self, data, function_name, uuid):
         LOGGER.debug("Set next request for %s, %s on on SimpleDB." % (function_name, uuid))
 
     def _setNextRequestErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to set next request for %s, %s on SimpleDB.\n%s" % (function_name, uuid, error.value))
 
-
-    

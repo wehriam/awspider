@@ -1,2 +1,4 @@
-from data import DataResource
-from execution import ExecutionResource
+from .data import DataResource
+from .execution import ExecutionResource
+from .interface import InterfaceResource
+from .exposed import ExposedResource

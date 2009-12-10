@@ -1,22 +1,18 @@
 import inspect
 import types 
 
-__all__ = ["expose", "make_callable", "AWSpiderPlugin"]
 
+__all__ = ["expose", "make_callable", "AWSpiderPlugin"]
 EXPOSED_FUNCTIONS = {}
 CALLABLE_FUNCTIONS = {}
 MEMOIZED_FUNCTIONS = {}
 
-    
+
 def expose(func=None, interval=0, name=None, memoize=False):
     if func is not None:
-        if memoize:
-            MEMOIZED_FUNCTIONS[id(f)] = True
         EXPOSED_FUNCTIONS[id(func)] = {"interval":interval, "name":name}
         return func
     def decorator(f):
-        if memoize:
-            MEMOIZED_FUNCTIONS[id(f)] = True
         EXPOSED_FUNCTIONS[id(f)] = {"interval":interval, "name":name}
         return f
     return decorator
@@ -24,19 +20,16 @@ def expose(func=None, interval=0, name=None, memoize=False):
 
 def make_callable(func=None, interval=0, name=None, memoize=False):
     if func is not None:
-        if memoize:
-            MEMOIZED_FUNCTIONS[id(func)] = True
         CALLABLE_FUNCTIONS[id(func)] = {"interval":interval, "name":name}
         return func
     def decorator(f):
-        if memoize:
-            MEMOIZED_FUNCTIONS[id(f)] = True
         CALLABLE_FUNCTIONS[id(f)] = {"interval":interval, "name":name}
         return f
     return decorator
 
 
 class AWSpiderPlugin(object):
+    
     def __init__(self, spider):
         self.spider = spider
         check_method = lambda x:isinstance(x[1], types.MethodType)
@@ -53,8 +46,6 @@ class AWSpiderPlugin(object):
                     instance_method[1],
                     interval=CALLABLE_FUNCTIONS[instance_id]["interval"],
                     name=CALLABLE_FUNCTIONS[instance_id]["name"])
-            if instance_id in MEMOIZED_FUNCTIONS:
-                self.spider.memoize(instance_method[1])
                 
     def getPage(self, *args, **kwargs):
         return self.spider.getPage(*args, **kwargs)

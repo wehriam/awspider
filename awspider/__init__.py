@@ -96,9 +96,10 @@ class AWSpider:
     shutdown_trigger_id = None
     
     logging_handler = None
-    job_limit = 500
+    job_limit = 2500
     
     uuid_limits = {'start':None, 'end':None}
+    active_jobs = {}
     
     def __init__( self, 
                 aws_access_key_id, 
@@ -381,7 +382,6 @@ class AWSpider:
         return error
     
     def callExposedFunctionImmediately( self, func, kwargs, function_name ):
-        
         d = maybeDeferred( func, **kwargs )
         d.addCallback( self._callExposedFunctionImmediatelyCallback, function_name )
         d.addErrback( self._callExposedFunctionImmediatelyErrback, function_name )
@@ -687,13 +687,13 @@ class AWSpider:
                 d = self.sdb.select(sql)
                 d.addCallback(self._queryCallback2)
                 d.addErrback(self._queryErrback)
-        if len(keys) >= (self.job_limit-10) and len(deferreds) > 0:
-            LOGGER.debug("Job limit reached. Querying again.")
-            d = DeferredList(deferreds, consumeErrors=True)
-            d.addCallback(self.query)
             
     def _queryCallback2(self, data):
         for uuid in data:
+            
+            if uuid in self.active_jobs:
+                logger.error("Skipping %s" % uuid)
+                continue
             
             kwargs_raw = {}
             reserved_arguments = {}
@@ -758,8 +758,11 @@ class AWSpider:
                 self.setReservationError( uuid )
                 continue
             
-            #reactor.callInThread( self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid  )
-            self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
+            self.active_jobs[uuid] = True
+            reactor.callInThread(self.callExposedFunction, exposed_function["function"], kwargs, function_name, uuid)
+            #self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
+            
+        #self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
             
     def callExposedFunction( self, func, kwargs, function_name, uuid ):
         
@@ -803,19 +806,22 @@ class AWSpider:
         if self.aws_s3_storage_bucket is not None:
             if data is None:
                 logger.debug( "Recieved None for %s, %s." % (function_name, uuid) )
+                del self.active_jobs[uuid]
                 return None
             else:    
                 logger.debug( "Putting result for %s, %s on S3." % (function_name, uuid) )
                 pickled_data = cPickle.dumps( data )
                 d = self.s3.putObject( self.aws_s3_storage_bucket, uuid, pickled_data, content_type="text/plain", gzip=True )
                 d.addErrback( self._exposedFunctionErrback2, function_name, uuid )
-                d.addCallback( self._exposedFunctionCallback2, data )
+                d.addCallback( self._exposedFunctionCallback2, data, uuid )
                 return d
     
-    def _exposedFunctionCallback2( self, s3_callback_data, data ):
+    def _exposedFunctionCallback2( self, s3_callback_data, data, uuid ):
+        del self.active_jobs[uuid]
         return data
     
     def _exposedFunctionErrback( self, error, function_name, uuid ):
+        del self.active_jobs[uuid]
         try:
             error.raiseException()
         except DeleteReservationException, e:
@@ -832,6 +838,7 @@ class AWSpider:
         logger.error( "Error with %s, %s.\n%s" % (function_name, uuid, error) )
     
     def _exposedFunctionErrback2( self, error, function_name, uuid ):
+        del self.active_jobs[uuid]
         logger.error( "Could not put results of %s, %s on S3.\n%s" % (function_name, uuid, error) )
 
     def shutdown( self ):
@@ -1010,7 +1017,10 @@ class AWSpider:
         splits = [{"start":x[0], "end":x[1]} for x in splits]
         peer_uuids = self.peers.keys()
         peer_uuids.sort()
-        self.uuid_limits = splits[peer_uuids.index(self.uuid)]
+        if self.uuid in peer_uuids:
+            self.uuid_limits = splits[peer_uuids.index(self.uuid)]
+        else:
+            self.uuid_limits = {"start":None, "end":None}
         logger.debug( "Updated UUID limits to: %s" % self.uuid_limits)
         
     def _coordinateErrback( self, error ):

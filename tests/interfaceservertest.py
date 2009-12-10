@@ -3,10 +3,10 @@ import hashlib
 from twisted.internet.defer import DeferredList
 from twisted.trial import unittest
 import yaml
-from awspider.servers import ExecutionServer
+from awspider.servers import InterfaceServer
 from awspider.aws import AmazonS3, AmazonSDB
 
-class ExecutionServerStartTestCase(unittest.TestCase):
+class InterfaceServerStartTestCase(unittest.TestCase):
     
     def setUp(self):
         config_path = os.path.abspath(os.path.join(
@@ -26,7 +26,7 @@ class ExecutionServerStartTestCase(unittest.TestCase):
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
         self.aws_sdb_coordination_domain = "%s_coordination" % self.uuid
-        self.executionserver = ExecutionServer( 
+        self.interfaceserver = InterfaceServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
             aws_s3_cache_bucket = "%s_cache" % self.uuid,
@@ -46,15 +46,15 @@ class ExecutionServerStartTestCase(unittest.TestCase):
         return d
         
     def testStart(self):
-        d = self.executionserver.start()
+        d = self.interfaceserver.start()
         d.addCallback(self._startCallback)
         return d 
     
     def _startCallback(self, data):
-        d = self.executionserver.shutdown()
+        d = self.interfaceserver.shutdown()
         return d
 
-class ExecutionTestCase(unittest.TestCase):
+class InterfaceTestCase(unittest.TestCase):
 
     def setUp(self):
         config_path = os.path.abspath(os.path.join(
@@ -74,18 +74,18 @@ class ExecutionTestCase(unittest.TestCase):
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
         self.aws_sdb_coordination_domain = "%s_coordination" % self.uuid
-        self.executionserver = ExecutionServer( 
+        self.interfaceserver = InterfaceServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
             aws_s3_cache_bucket = "%s_cache" % self.uuid,
             aws_s3_storage_bucket = self.aws_s3_storage_bucket, 
             aws_sdb_reservation_domain = self.aws_sdb_reservation_domain, 
             aws_sdb_coordination_domain = self.aws_sdb_coordination_domain)
-        return self.executionserver.start()
+        return self.interfaceserver.start()
     
     def tearDown(self):
         deferreds = []  
-        deferreds.append(self.executionserver.shutdown())
+        deferreds.append(self.interfaceserver.shutdown())
         d = DeferredList(deferreds)
         d.addCallback(self._tearDownCallback)
         return d

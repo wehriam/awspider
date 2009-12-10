@@ -4,7 +4,6 @@ from twisted.internet import reactor
 from .base import BaseServer, LOGGER
 from ..resources2 import DataResource
 
-
 class DataServer(BaseServer):
     
     def __init__(self,
@@ -12,7 +11,7 @@ class DataServer(BaseServer):
                  aws_secret_access_key,
                  aws_s3_storage_bucket,
                  aws_sdb_reservation_domain,
-                 port=5001,
+                 port=5002,
                  log_file='dataserver.log',
                  log_directory=None,
                  log_level="debug",

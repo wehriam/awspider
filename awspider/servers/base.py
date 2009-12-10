@@ -1,14 +1,16 @@
 import time
 from uuid import uuid4
+import inspect
 import logging
 import logging.handlers
 from twisted.internet import reactor
-from twisted.internet.defer import Deferred, DeferredList
+from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 from ..aws import AmazonS3, AmazonSDB
 from ..requestqueuer import RequestQueuer
 from ..pagegetter import PageGetter
 from ..timeoffset import getTimeOffset
-from ..networkaddress import getNetworkAddress
+from ..exceptions import DeleteReservationException
+import cPickle
 
 LOGGER = logging.getLogger("main")
 
@@ -17,10 +19,14 @@ class BaseServer(object):
     logging_handler = None
     shutdown_trigger_id = None
     uuid = uuid4().hex
-    public_ip = None
-    local_ip = None
-    network_information = {}
     start_time = time.time()
+    active_jobs = {}
+    reserved_arguments = [
+        "reservation_function_name", 
+        "reservation_created", 
+        "reservation_next_request", 
+        "reservation_error"]
+    functions = {}
     
     def __init__(self,
                  aws_access_key_id, 
@@ -38,6 +44,8 @@ class BaseServer(object):
                  name=None,
                  time_offset=None,
                  port=8080):
+        if name == None:
+            name = "AWSpider Server UUID: %s" % self.uuid
         self.port = port
         self.time_offset = time_offset
         self.name = name
@@ -160,22 +168,135 @@ class BaseServer(object):
             message = "Could not get time offset for sync."
             LOGGER.critical(message)
             raise Exception(message)
-            
-    def getNetworkAddress(self):
-        d = getNetworkAddress()
-        d.addCallback(self._getNetworkAddressCallback)
-        d.addErrback(self._getNetworkAddressErrback)
+    
+    def callExposedFunction(self, func, kwargs, function_name, uuid=None):
+        d = maybeDeferred(func, **kwargs)
+        d.addCallback(self._callExposedFunctionCallback, function_name, uuid)
+        d.addErrback(self._callExposedFunctionErrback, function_name, uuid)
         return d
 
-    def _getNetworkAddressCallback( self, data  ):   
-        if "public_ip" in data:
-            self.public_ip = data["public_ip"]
-            self.network_information["public_ip"] = self.public_ip
-        if "local_ip" in data:
-            self.local_ip = data["local_ip"]  
-            self.network_information["local_ip"] = self.local_ip
+    def _callExposedFunctionErrback(self, error, function_name, uuid):
+        if uuid is not None:
+            del self.active_jobs[uuid]
+        try:
+            error.raiseException()
+        except DeleteReservationException, e:
+            if uuid is not None:
+                self.deleteReservation(uuid)
+            message = """Error with %s, %s.\n%s            
+            Reservation deleted at request of the function.""" % (
+                function_name,
+                uuid,
+                error)
+            LOGGER.error(message)
+            return
+        except:
+            pass
+        LOGGER.error("Error with %s, %s.\n%s" % (function_name, uuid, error))
 
-    def _getNetworkAddressErrback(self, error):
-        message = "Could not get network address." 
-        LOGGER.critical(message)
-        raise Exception(message)
+    def _callExposedFunctionCallback(self, data, function_name, uuid):
+        LOGGER.debug("Function %s returned successfully." % (function_name))
+        # If the UUID is None, this is a one-off type of thing.
+        if uuid is None:
+            return data
+        # If the data is None, there's nothing to store.
+        if data is None:
+            del self.active_jobs[uuid]
+            return None
+        # If we have an place to store the response on S3, do it.
+        if self.aws_s3_storage_bucket is not None:
+            LOGGER.debug("Putting result for %s, %s on S3." % (function_name, uuid))
+            pickled_data = cPickle.dumps(data)
+            d = self.s3.putObject(
+                self.aws_s3_storage_bucket, 
+                uuid, 
+                pickled_data, 
+                content_type="text/plain", 
+                gzip=True)
+            d.addCallback(self._exposedFunctionCallback2, data, uuid)
+            d.addErrback(self._exposedFunctionErrback2, data, function_name, uuid)
+            return d
+        return data
+
+    def _exposedFunctionErrback2(self, error, data, function_name, uuid):
+        del self.active_jobs[uuid]
+        LOGGER.error("Could not put results of %s, %s on S3.\n%s" % (function_name, uuid, error))
+        return data
+        
+    def _exposedFunctionCallback2(self, s3_callback_data, data, uuid):
+        del self.active_jobs[uuid]
+        return data    
+        
+    def expose(self, *args, **kwargs):
+        return self.makeCallable(expose=True, *args, **kwargs)
+
+    def makeCallable(self, func, interval=0, name=None, expose=False):
+        argspec = inspect.getargspec(func)
+        # Get required / optional arguments
+        arguments = argspec[0]
+        if len(arguments) > 0 and arguments[0:1][0] == 'self':
+            arguments.pop(0)
+        kwarg_defaults = argspec[3]
+        if kwarg_defaults is None:
+            kwarg_defaults = []
+        required_arguments = arguments[0:len(arguments) - len(kwarg_defaults)]
+        optional_arguments = arguments[len(arguments) - len(kwarg_defaults):]
+        # Get function name, usually class/method
+        if name is not None:
+            function_name = name
+        elif hasattr(func, "im_class"):
+            function_name = "%s/%s" % (func.im_class.__name__, func.__name__)
+        else:
+            function_name = func.__name__
+        function_name = function_name.lower()
+        # Make sure the function isn't using any reserved arguments.
+        for key in required_arguments:
+            if key in self.reserved_arguments:
+                message = "Required argument name '%s' used in function %s is reserved." % (key, function_name)
+                LOGGER.error(message)
+                raise Exception(message)
+        for key in optional_arguments:
+            if key in self.reserved_arguments:
+                message = "Optional argument name '%s' used in function %s is reserved." % (key, function_name)
+                LOGGER.error(message)
+                raise Exception(message)
+        # Make sure we don't already have a function with the same name.
+        if function_name in self.functions:
+            raise Exception("A method or function with the name %s is already callable." % function_name)
+        # Add it to our list of callable functions.
+        self.functions[function_name] = {
+            "function":func,
+            "interval":interval,
+            "required_arguments":required_arguments,
+            "optional_arguments":optional_arguments
+        }
+        LOGGER.info("Function %s is now callable." % function_name)
+        return function_name
+
+    def getPage(self, *args, **kwargs):
+        return self.pg.getPage(*args, **kwargs)
+        
+    def setHostMaxRequestsPerSecond(self, *args, **kwargs):
+        return self.rq.setHostMaxRequestsPerSecond(*args, **kwargs)
+
+    def setHostMaxSimultaneousRequests(self, *args, **kwargs):
+        return self.rq.setHostMaxSimultaneousRequests(*args, **kwargs)
+
+    def deleteReservation(self, uuid, function_name="Unknown"):
+        LOGGER.info("Deleting reservation %s, %s." % (function_name, uuid))
+        deferreds = []
+        deferreds.append(self.sdb.delete(self.aws_sdb_reservation_domain, uuid))
+        deferreds.append(self.s3.deleteObject(self.aws_s3_storage_bucket, uuid))
+        d = DeferredList(deferreds)
+        d.addCallback(self._deleteReservationCallback, function_name, uuid)
+        d.addErrback(self._deleteReservationErrback, function_name, uuid)
+        return d
+
+    def _deleteReservationCallback(self, data, function_name, uuid):
+        LOGGER.info("Reservation %s, %s successfully deleted." % (function_name, uuid))
+        return True
+
+    def _deleteReservationErrback(self, error, function_name, uuid ):
+        LOGGER.error("Error deleting reservation %s, %s.\n%s" % (function_name, uuid, error))
+        return False
+        

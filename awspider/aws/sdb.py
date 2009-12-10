@@ -533,12 +533,51 @@ class AmazonSDB:
        
         **Arguments:**
          * *select_expression* -- Select expression
-        """   
+        """  
+        if "count(" in select_expression.lower():
+            return self._selectCount(select_expression)
         return self._select(select_expression)
-       
+      
+    def _selectCount(self, select_expression, next_token=None, 
+            previous_count=0,
+            total_box_usage=0):
+        parameters = {}
+        parameters["Action"] = "Select"
+        parameters["SelectExpression"] = select_expression
+        if next_token is not None:
+            parameters["NextToken"] = next_token
+        d = self._request(parameters)
+        d.addCallback(self._selectCountCallback, 
+                      select_expression=select_expression,
+                      previous_count=previous_count,
+                      total_box_usage=total_box_usage)
+        return d
+
+    def _selectCountCallback(self, data, select_expression=None, 
+            previous_count=0,
+            total_box_usage=0):
+        xml = ET.fromstring(data["response"])
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        total_box_usage += box_usage
+        next_token_element = xml.find(".//%sNextToken" % SDB_NAMESPACE)
+        if next_token_element is not None:
+            next_token = next_token_element.text
+        else:
+            next_token = None
+        count = previous_count + int(xml.find(".//%sValue" % SDB_NAMESPACE).text)
+        if next_token is not None:
+            return self._selectCount(select_expression, next_token=next_token,
+                previous_count=count,
+                total_box_usage=total_box_usage)
+        logger.debug("""Select:\n'%s'\nBox usage: %s""" % (
+            select_expression,
+            total_box_usage))
+        return count
+        
     def _select(self, select_expression, next_token=None, 
-                previous_results=None,
-                total_box_usage=0):
+            previous_results=None,
+            total_box_usage=0):
         parameters = {}
         parameters["Action"] = "Select"
         parameters["SelectExpression"] = select_expression
@@ -552,8 +591,8 @@ class AmazonSDB:
         return d
 
     def _selectCallback(self, data, select_expression=None, 
-                        previous_results=None,
-                        total_box_usage=0):
+            previous_results=None,
+            total_box_usage=0):
         if previous_results is not None:
             results = previous_results
         else:
