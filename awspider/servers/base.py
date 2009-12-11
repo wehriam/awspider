@@ -1,3 +1,4 @@
+import os
 import time
 from uuid import uuid4
 import inspect
@@ -192,7 +193,11 @@ class BaseServer(object):
             return
         except:
             pass
-        LOGGER.error("Error with %s, %s.\n%s" % (function_name, uuid, error))
+        if uuid is None:
+            LOGGER.error("Error with %s, %s.\n%s" % (function_name, uuid, error))
+        else:
+            LOGGER.error("Error with %s.\n%s" % (function_name, error))
+        return error
 
     def _callExposedFunctionCallback(self, data, function_name, uuid):
         LOGGER.debug("Function %s returned successfully." % (function_name))

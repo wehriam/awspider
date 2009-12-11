@@ -1,4 +1,5 @@
 import pprint
+from uuid import uuid4
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 from twisted.web.resource import Resource
 from twisted.internet import reactor
@@ -33,7 +34,9 @@ class InterfaceServer(BaseServer):
             time_offset=None):
         if name == None:
             name = "AWSpider Interface Server UUID: %s" % self.uuid
-        resource = InterfaceResource(self)
+        resource = Resource()
+        interface_resource = InterfaceResource(self)
+        resource.putChild("interface", interface_resource)
         self.function_resource = Resource()
         resource.putChild("function", self.function_resource)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
@@ -114,11 +117,11 @@ class InterfaceServer(BaseServer):
             LOGGER.info("Function %s is now available via the HTTP interface." % function_name)
             
     def createReservation(self, function_name, **kwargs):
-        #if not isinstance(function_name, str):
-        #    for key in self.functions:
-        #        if self.functions[key]["function"] == function_name:
-        #            function_name = key
-        #            break
+        if not isinstance(function_name, str):
+            for key in self.functions:
+                if self.functions[key]["function"] == function_name:
+                    function_name = key
+                    break
         if function_name not in self.functions:
             raise Exception("Function %s does not exist." % function_name )
         function = self.functions[function_name]
@@ -151,6 +154,7 @@ class InterfaceServer(BaseServer):
                 d = DeferredList([a], consumeErrors=True)
             else:
                 LOGGER.debug("Calling %s immediately with arguments:\n%s" % (function_name, PRETTYPRINTER.pformat(filtered_kwargs)))
+                self.active_jobs[uuid] = True
                 b = self.callExposedFunction(function["function"], filtered_kwargs, function_name, uuid)
                 d = DeferredList([a,b], consumeErrors=True)
             d.addCallback(self._createReservationCallback2, function_name, uuid)
@@ -162,11 +166,11 @@ class InterfaceServer(BaseServer):
             return d
             
     def _createReservationCallback(self, data, function_name, uuid):
-        logger.debug( "Created reservation on SimpleDB for %s, %s." % (function_name, uuid))
+        LOGGER.debug( "Created reservation on SimpleDB for %s, %s." % (function_name, uuid))
         return uuid
 
     def _createReservationErrback(self, error, function_name, uuid):
-        logger.error( "Unable to create reservation on SimpleDB for %s:%s, %s.\n" % (function_name, uuid, error) )
+        LOGGER.error( "Unable to create reservation on SimpleDB for %s:%s, %s.\n" % (function_name, uuid, error) )
         return error
 
     def _createReservationCallback2(self, data, function_name, uuid):
@@ -179,5 +183,9 @@ class InterfaceServer(BaseServer):
             return {data[0][1]:data[1][1]}
 
     def _createReservationErrback2( self, error, function_name, uuid ):
-        logger.error( "Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error) )
+        LOGGER.error( "Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error) )
         return error
+    
+    def showReservation(self, uuid):
+        d = self.sdb.getAttributes(self.aws_sdb_reservation_domain, uuid)
+        return d

@@ -2,7 +2,7 @@ import cPickle
 import time
 import pprint
 from twisted.web.client import _parse
-from uuid import uuid4, uuid5, NAMESPACE_DNS
+from uuid import uuid5, NAMESPACE_DNS
 from twisted.internet.defer import Deferred, DeferredList
 from twisted.internet import task
 from twisted.internet import reactor

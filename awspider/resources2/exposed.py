@@ -1,6 +1,6 @@
 import sys
 from twisted.web import server
-from twisted.python.failure import Failure
+from twisted.internet.defer import maybeDeferred 
 from .base import BaseResource
 
 class ExposedResource(BaseResource):
@@ -17,13 +17,7 @@ class ExposedResource(BaseResource):
         kwargs = {}
         for key in request.args:
             kwargs[key] = request.args[key][0]
-        try:
-            d = self.interfaceserver.createReservation(self.function_name, **kwargs)
-        except:
-            return self._errorResponse(
-                Failure(exc_value=sys.exc_value, 
-                    exc_type=sys.exc_type, 
-                    exc_tb=sys.exc_traceback))
+        d = maybeDeferred(self.interfaceserver.createReservation, self.function_name, **kwargs)
         d.addCallback(self._successResponse)
         d.addErrback(self._errorResponse)
         d.addCallback(self._immediateResponse, request)
