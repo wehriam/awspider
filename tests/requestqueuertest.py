@@ -5,7 +5,7 @@ from awspider.requestqueuer import RequestQueuer
 
 import os
 import sys
-sys.path.append(os.path.join( os.path.dirname(__file__), "lib"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
 
 from miniwebserver import MiniWebServer
 
@@ -23,26 +23,26 @@ class RequestQueuerTestCase(unittest.TestCase):
         return self.mini_web_server.shutdown()
 
     def testRequestQueuerOnSuccess(self):  
-        d = self.rq.getPage("http://127.0.0.1:8080", timeout=5)
+        d = self.rq.getPage("http://127.0.0.1:8080/helloworld", timeout=5)
         return d
 
     def testRequestQueuerOnFailure(self): 
         d = self.rq.getPage("http://0.0.0.0:99", timeout=5)
-        d.addErrback( self._getPageErrback )  
+        d.addErrback(self._getPageErrback)  
         return d      
     
     def testActive(self):
-        self.failUnlessEqual( isinstance(self.rq.getActive(), int), True )
+        self.failUnlessEqual(isinstance(self.rq.getActive(), int), True)
             
     def testPending(self):
-        self.failUnlessEqual( isinstance(self.rq.getPending(), int), True )
+        self.failUnlessEqual(isinstance(self.rq.getPending(), int), True)
 
     def testActiveRequestsByHost(self):
-        self.failUnlessEqual( isinstance(self.rq.getActiveRequestsByHost(), dict), True )
+        self.failUnlessEqual(isinstance(self.rq.getActiveRequestsByHost(), dict), True)
 
     def testPendingRequestsByHost(self):
-        self.failUnlessEqual( isinstance(self.rq.getPendingRequestsByHost(), dict), True )
+        self.failUnlessEqual(isinstance(self.rq.getPendingRequestsByHost(), dict), True)
 
-    def _getPageErrback( self, error ):
+    def _getPageErrback(self, error):
         return True
         

@@ -341,8 +341,8 @@ class ExecutionServer(BaseServer):
                     parameters["timeout"] = kwargs["timeout"]
                 if "followRedirect" in kwargs:
                     parameters["followRedirect"] = kwargs["followRedirect"]
-                if "hash_url" in kwargs: 
-                    parameters["hash_url"] = kwargs["hash_url"]
+                if "url_hash" in kwargs: 
+                    parameters["url_hash"] = kwargs["url_hash"]
                 if "cache" in kwargs: 
                     parameters["cache"] = kwargs["cache"]
                 if "prioritize" in kwargs: 

@@ -41,8 +41,8 @@ class PeerResource(Resource):
                     kwargs["timeout"] = int( request.args["timeout"][0] )
                 if "followRedirect" in request.args:
                     kwargs["followRedirect"] = evaluateboolean( request.args["followRedirect"][0] )
-                if "hash_url" in request.args: 
-                    kwargs["hash_url"] = request.args["hash_url"][0] 
+                if "url_hash" in request.args: 
+                    kwargs["url_hash"] = request.args["url_hash"][0] 
                 if "cache" in request.args: 
                     kwargs["cache"] = int( request.args["cache"][0] )
                 if "prioritize" in request.args: 
