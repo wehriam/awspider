@@ -1,15 +1,21 @@
 import cPickle
-import hashlib
-import dateutil.parser
+import twisted.python.failure
 import datetime
+import dateutil.parser
+import hashlib
+import logging
+import time
 from .requestqueuer import RequestQueuer
 from .unicodeconverter import convertToUTF8, convertToUnicode
-import logging
 
-LOGGER = logging.getLogger("main")
+
+class ReportedFailure(twisted.python.failure.Failure):
+    pass
+
 
 class StaleContentException(Exception):
     pass
+
 
 # A UTC class.
 class CoordinatedUniversalTime(datetime.tzinfo):
@@ -27,38 +33,42 @@ class CoordinatedUniversalTime(datetime.tzinfo):
 
 
 UTC = CoordinatedUniversalTime()
+LOGGER = logging.getLogger("main")
 
 
 class PageGetter:
     
-    def __init__(self, s3, aws_s3_bucket, rq=None):
-        self.s3 = s3
-        self.aws_s3_bucket = aws_s3_bucket
-        if rq is None:
-            self.rq = RequestQueuer()
-        else:
-            self.rq = rq
-    
+    def __init__(self, 
+        s3, 
+        aws_s3_http_cache_bucket,
+        time_offset=0,
+        rq=None):
         """
         Create an S3 based HTTP cache.
 
         **Arguments:**
          * *s3* -- S3 client object.
-         * *aws_s3_bucket* -- S3 bucket to use.
+         * *aws_s3_http_cache_bucket* -- S3 bucket to use for the HTTP cache.
 
         **Keyword arguments:**
          * *rq* -- Request Queuer object. (Default ``None``)      
 
         """
+        self.s3 = s3
+        self.aws_s3_http_cache_bucket = aws_s3_http_cache_bucket
+        self.time_offset = time_offset
+        if rq is None:
+            self.rq = RequestQueuer()
+        else:
+            self.rq = rq
     
     def clearCache(self):
-        d = self.s3.emptyBucket(self.aws_s3_bucket)
-        return d
-
         """
         Clear the S3 bucket containing the S3 cache.
         """
-
+        d = self.s3.emptyBucket(self.aws_s3_http_cache_bucket)
+        return d
+        
     def getPage(self, 
             url, 
             method='GET', 
@@ -152,7 +162,7 @@ class PageGetter:
             # Cache mode 0. Check cache, send cached headers, possibly use cached data.
             LOGGER.debug("Checking S3 Head object request %s for URL %s." % (request_hash, url))
             # Check if there is a cache entry, return headers.
-            d = self.s3.headObject(self.aws_s3_bucket, request_hash)
+            d = self.s3.headObject(self.aws_s3_http_cache_bucket, request_hash)
             d.addCallback(self._checkCacheHeaders, 
                 request_hash,
                 url,  
@@ -169,7 +179,7 @@ class PageGetter:
         elif cache == 1:
             # Cache mode 1. Use cache immediately, if possible.
             LOGGER.debug("Getting S3 object request %s for URL %s." % (request_hash, url))
-            d = self.s3.getObject(self.aws_s3_bucket, request_hash)
+            d = self.s3.getObject(self.aws_s3_http_cache_bucket, request_hash)
             d.addCallback(self._returnCachedData, request_hash, content_sha1)
             d.addErrback(self._requestWithNoCacheHeaders, 
                 request_hash, 
@@ -177,7 +187,7 @@ class PageGetter:
                 request_kwargs,
                 content_sha1,
                 confirm_cache_write)       
-            return d       
+            return d      
                   
     def _checkCacheHeaders(self, 
             data, 
@@ -187,6 +197,13 @@ class PageGetter:
             content_sha1,
             confirm_cache_write):
         LOGGER.debug("Got S3 Head object request %s for URL %s." % (request_hash, url))
+        http_history = {}
+        if "content-sha1" in data["headers"]:
+            http_history["content-sha1"] = data["headers"]["content-sha1"][0]
+        if "request-failures" in data["headers"]:
+            http_history["request-failures"] = data["headers"]["request-failures"][0].split(",")
+        if "content-changes" in data["headers"]:
+            http_history["content-changes"] = data["headers"]["content-changes"][0].split(",")
         # If cached data is not stale, return it.
         if "cache-expires" in data["headers"]:
             try:
@@ -194,7 +211,7 @@ class PageGetter:
                 now = datetime.datetime.now(UTC)
                 if expires > now:
                     LOGGER.debug("Cached data %s for URL %s is not stale. Getting from S3." % (request_hash, url))
-                    d = self.s3.getObject(self.aws_s3_bucket, request_hash)
+                    d = self.s3.getObject(self.aws_s3_http_cache_bucket, request_hash)
                     d.addCallback(self._returnCachedData, request_hash, content_sha1)
                     d.addErrback(
                         self._requestWithNoCacheHeaders, 
@@ -202,7 +219,8 @@ class PageGetter:
                         url,
                         request_kwargs, 
                         content_sha1,
-                        confirm_cache_write)
+                        confirm_cache_write,
+                        http_history=http_history)
                     return d
             except Exception, e:
                 LOGGER.error(str(e))
@@ -222,13 +240,17 @@ class PageGetter:
             request_hash,
             url, 
             content_sha1,
-            confirm_cache_write)
+            confirm_cache_write,
+            http_history=http_history)
         d.addErrback(
             self._handleRequestWithCacheHeadersError, 
             request_hash, 
             url, 
+            request_kwargs,
             content_sha1, 
-            confirm_cache_write)
+            confirm_cache_write,
+            data,
+            http_history=http_history)
         return d
         
     def _returnFreshData(self, 
@@ -236,14 +258,16 @@ class PageGetter:
             request_hash, 
             url, 
             content_sha1, 
-            confirm_cache_write):
+            confirm_cache_write,
+            http_history=None):
         LOGGER.debug("Got request %s for URL %s." % (request_hash, url))
         data["pagegetter-cache-hit"] = False
         return self._storeData(
             data, 
             request_hash, 
             content_sha1, 
-            confirm_cache_write)
+            confirm_cache_write,
+            http_history=http_history)
 
     def _requestWithNoCacheHeaders(self, 
             error, 
@@ -251,7 +275,10 @@ class PageGetter:
             url, 
             request_kwargs, 
             content_sha1,
-            confirm_cache_write):
+            confirm_cache_write,
+            http_history=None):
+        if isinstance(error, ReportedFailure):
+            return error
         # No header stored in the cache. Make the request.
         LOGGER.debug("Unable to find header for request %s on S3, fetching from %s." % (request_hash, url))
         d = self.rq.getPage(url, **request_kwargs)
@@ -260,19 +287,61 @@ class PageGetter:
             request_hash, 
             url, 
             content_sha1,
-            confirm_cache_write)
+            confirm_cache_write,
+            http_history=http_history)
+        d.addErrback(
+            self._requestWithNoCacheHeadersErrback, 
+            request_hash, 
+            url, 
+            content_sha1,
+            confirm_cache_write,
+            http_history=http_history)
         return d        
-
+    
+    def _requestWithNoCacheHeadersErrback(self, 
+            error,     
+            request_hash, 
+            url, 
+            content_sha1,
+            confirm_cache_write,
+            http_history=None):
+        LOGGER.error("Unable to get request %s for URL %s.\n%s" % (request_hash, url, error))
+        if http_history is None:
+            http_history = {} 
+        if "request-failures" not in http_history:
+            http_history["request-failures"] = [str(int(self.time_offset + time.time()))]
+        else:
+            http_history["request-failures"].append(str(int(self.time_offset + time.time())))
+        http_history["request-failures"] = http_history["request-failures"][-3:]
+        LOGGER.debug("Writing data for failed request %s to S3." % request_hash)
+        headers = {}
+        headers["request-failures"] = ",".join(http_history["request-failures"])
+        d = self.s3.putObject(
+            self.aws_s3_http_cache_bucket, 
+            request_hash, 
+            "", 
+            content_type="text/plain", 
+            headers=headers)
+        if confirm_cache_write:
+            d.addCallback(self._requestWithNoCacheHeadersErrbackCallback, error)
+            return d       
+        return error
+        
+    def _requestWithNoCacheHeadersErrbackCallback(self, data, error):
+        return error
+    
     def _handleRequestWithCacheHeadersError(self, 
             error, 
             request_hash, 
             url, 
             request_kwargs, 
             content_sha1, 
-            confirm_cache_write):
+            confirm_cache_write,
+            data,
+            http_history=None):
         if error.value.status == "304":
             LOGGER.debug("Request %s for URL %s hasn't been modified since it was last downloaded. Getting data from S3." % (request_hash, url))
-            d = self.s3.getObject(self.aws_s3_bucket, request_hash)
+            d = self.s3.getObject(self.aws_s3_http_cache_bucket, request_hash)
             d.addCallback(self._returnCachedData, request_hash, content_sha1)
             d.addErrback(
                 self._requestWithNoCacheHeaders, 
@@ -280,22 +349,46 @@ class PageGetter:
                 url, 
                 request_kwargs, 
                 content_sha1,
-                confirm_cache_write)
+                confirm_cache_write,
+                http_history=http_history)
             return d
         else:
-            LOGGER.error("Unable to get request %s for URL %s.\n%s" % (request_hash, url, error))
-            return error
+            if http_history is None:
+                http_history = {} 
+            if "request-failures" not in http_history:
+                http_history["request-failures"] = [str(int(self.time_offset + time.time()))]
+            else:
+                http_history["request-failures"].append(str(int(self.time_offset + time.time())))
+            http_history["request-failures"] = http_history["request-failures"][-3:]
+            LOGGER.debug("Writing data for failed request %s to S3." % request_hash)
+            headers = {}
+            for key in data["headers"]:
+                headers[key] = data["headers"][key][0]
+            headers["request-failures"] = ",".join(http_history["request-failures"])
+            d = self.s3.putObject(
+                self.aws_s3_http_cache_bucket, 
+                request_hash, 
+                data["response"], 
+                content_type=data["headers"]["content-type"][0], 
+                headers=headers)
+            if confirm_cache_write:
+                d.addCallback(self._handleRequestWithCacheHeadersErrorCallback, error)
+                return d
+            return ReportedFailure(error)
             
+    def _handleRequestWithCacheHeadersErrorCallback(self, data, error):
+        return ReportedFailure(error)
+        
     def _returnCachedData(self, data, request_hash, content_sha1):
         LOGGER.debug("Got request %s from S3." % (request_hash))
         data["pagegetter-cache-hit"] = True
         data["status"] = 304
         data["message"] = "Not Modified"
-        if "cache-content-sha1" in data["headers"]:
-            data["content-sha1"] = data["headers"]["cache-content-sha1"][0]
+        if "content-sha1" in data["headers"]:
+            data["content-sha1"] = data["headers"]["content-sha1"][0]
             if content_sha1 == data["content-sha1"]:
                 raise StaleContentException(content_sha1)
-            del data["headers"]["cache-content-sha1"]
+            del data["headers"]["content-sha1"]
         if "cache-expires" in data["headers"]:
             data["headers"]["expires"] = data["headers"]["cache-expires"]
             del data["headers"]["cache-expires"]
@@ -307,13 +400,26 @@ class PageGetter:
             del data["headers"]["cache-last-modified"]
         return data
             
-    def _storeData(self, data, request_hash, content_sha1, confirm_cache_write):
+    def _storeData(self, 
+            data, 
+            request_hash, 
+            content_sha1, 
+            confirm_cache_write,
+            http_history=None):
+        data["content-sha1"] = hashlib.sha1(data["response"]).hexdigest()
+        if http_history is None:
+            http_history = {} 
+        if "content-sha1" not in http_history:
+            http_history["content-sha1"] = data["content-sha1"]
+        if "content-changes" not in http_history:
+            http_history["content-changes"] = []
+        if data["content-sha1"] != http_history["content-sha1"]:
+            http_history["content-changes"].append(str(int(self.time_offset + time.time())))
+        http_history["content-changes"] = http_history["content-changes"][-10:]
         LOGGER.debug("Writing data for request %s to S3." % request_hash)
         headers = {}
-        data["content-sha1"] = hashlib.sha1(data["response"]).hexdigest()
-        if content_sha1 == data["content-sha1"]:
-            raise StaleContentException(content_sha1)
-        headers["cache-content-sha1"] = data["content-sha1"]
+        headers["content-changes"] = ",".join(http_history["content-changes"])
+        headers["content-sha1"] = data["content-sha1"]
         if "cache-control" in data["headers"]: 
             if "no-cache" in data["headers"]["cache-control"][0]:
                 return data
@@ -326,11 +432,13 @@ class PageGetter:
         if "content-type" in data["headers"]:
             content_type = data["headers"]["content-type"][0]
         d = self.s3.putObject(
-            self.aws_s3_bucket, 
+            self.aws_s3_http_cache_bucket, 
             request_hash, 
             data["response"], 
             content_type=content_type, 
             headers=headers)
+        if content_sha1 == data["content-sha1"]:
+            raise StaleContentException(content_sha1)
         if confirm_cache_write:
             d.addCallback(self._storeDataCallback, data)
             return d

@@ -8,7 +8,7 @@ import time
 import dateutil.parser
 import logging
 from twisted.internet.defer import DeferredList
-from ..pagegetter import RequestQueuer
+from ..requestqueuer import RequestQueuer
 from .lib import etree_to_dict, safe_quote_tuple
 
 

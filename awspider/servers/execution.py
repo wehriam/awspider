@@ -9,7 +9,7 @@ from twisted.internet import reactor
 from twisted.web import server
 from .base import BaseServer, LOGGER
 from ..aws import sdb_now, sdb_now_add
-from ..resources2 import ExecutionResource
+from ..resources import ExecutionResource
 from ..networkaddress import getNetworkAddress
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
@@ -35,8 +35,8 @@ class ExecutionServer(BaseServer):
     def __init__(self,
             aws_access_key_id, 
             aws_secret_access_key, 
-            aws_s3_cache_bucket, 
             aws_sdb_reservation_domain, 
+            aws_s3_http_cache_bucket=None, 
             aws_s3_storage_bucket=None,
             aws_sdb_coordination_domain=None,
             max_simultaneous_requests=150,
@@ -63,7 +63,7 @@ class ExecutionServer(BaseServer):
             self,
             aws_access_key_id, 
             aws_secret_access_key, 
-            aws_s3_cache_bucket=aws_s3_cache_bucket, 
+            aws_s3_http_cache_bucket=aws_s3_http_cache_bucket, 
             aws_sdb_reservation_domain=aws_sdb_reservation_domain, 
             aws_s3_storage_bucket=aws_s3_storage_bucket,
             aws_sdb_coordination_domain=aws_sdb_coordination_domain,

@@ -6,7 +6,7 @@ import xml.etree.cElementTree as ET
 from datetime import datetime, timedelta
 import simplejson
 from ..unicodeconverter import convertToUTF8
-from ..pagegetter import RequestQueuer
+from ..requestqueuer import RequestQueuer
 from .lib import return_true, safe_quote_tuple
 
 
@@ -58,8 +58,7 @@ class AmazonSQS:
            'resource' argument for other class methods.
         """
         parameters = {
-            "Action":"ListQueues"
-        }
+            "Action":"ListQueues"}
         if name_prefix is not None:
             parameters["QueueNamePrefix"] = name_prefix
         d = self._request(parameters)
@@ -93,8 +92,7 @@ class AmazonSQS:
         name = convertToUTF8(name)
         parameters = {
             "Action":"CreateQueue",
-            "QueueName":name,
-        }
+            "QueueName":name}
         if visibility_timeout is not None:
             parameters["DefaultVisibilityTimeout"] = visibility_timeout
         d = self._request(parameters)
@@ -122,9 +120,7 @@ class AmazonSQS:
         **Returns:**
          * Deferred of boolean True.
         """
-        parameters = {
-            "Action":"DeleteQueue"
-        }
+        parameters = {"Action":"DeleteQueue"}
         d = self._request(parameters, resource=resource, method="DELETE")
         d.addCallback(return_true)
         d.addErrback(self._genericErrback)
@@ -149,9 +145,7 @@ class AmazonSQS:
         **Returns:**
          * Deferred of boolean True.
         """
-        parameters = {
-            "Action":"SetQueueAttributes"
-        }
+        parameters = {"Action":"SetQueueAttributes"}
         attributes = {}
         if policy is not None:
             attributes["Policy"] = simplejson.dumps(policy)
@@ -190,8 +184,7 @@ class AmazonSQS:
             "VisibilityTimeout",
             "CreatedTimestamp",
             "LastModifiedTimestamp",
-            "Policy"
-        ]
+            "Policy"]
         if name is not None:
             if name not in attributes:
                 raise Exception("Unknown attribute name '%s'." % name)
@@ -199,8 +192,7 @@ class AmazonSQS:
             name = "All"
         parameters = {
             "Action":"GetQueueAttributes",
-            "AttributeName":name
-        }       
+            "AttributeName":name}       
         d = self._request(parameters, resource=resource, method="DELETE")
         d.addCallback(self._getQueueAttributesCallback)
         d.addErrback(self._genericErrback)
@@ -220,8 +212,7 @@ class AmazonSQS:
             'CreatedTimestamp',
             'ApproximateNumberOfMessages',
             'LastModifiedTimestamp',
-            'VisibilityTimeout'
-        ]
+            'VisibilityTimeout']
         for name in integer_attribute_names:
             if name in attributes:
                 attributes[name] = int(attributes[name])
@@ -270,8 +261,7 @@ class AmazonSQS:
             "ReceiveMessage",
             "DeleteMessage",
             "ChangeMessageVisibility",
-            "GetQueueAttributes"
-        ]
+            "GetQueueAttributes"]
         for action in actions:
             if action not in action_options:
                 raise Exception("Unknown action name '%s'." % action)
@@ -279,8 +269,7 @@ class AmazonSQS:
             actions.append("*")
         parameters = {
             "Action":"AddPermission",
-            "Label":label
-        }
+            "Label":label}
         action_count = 1
         for name in actions:
             parameters["ActionName.%s" % action_count] = name
@@ -310,8 +299,7 @@ class AmazonSQS:
         """
         parameters = {
             "Action":"RemovePermission",
-            "Label":label
-        }
+            "Label":label}
         d = self._request(parameters, resource=resource)
         d.addCallback(return_true)
         d.addErrback(self._genericErrback)
@@ -335,8 +323,7 @@ class AmazonSQS:
         """
         parameters = {
             "Action":"SendMessage",
-            "MessageBody":message
-        }
+            "MessageBody":message}
         d = self._request(parameters, resource=resource)
         d.addCallback(self._sendMessageCallback)
         d.addErrback(self._genericErrback)
@@ -371,8 +358,7 @@ class AmazonSQS:
            'body'. Optionally 'sender_id' and 'sent_timestamp'.
         """
         parameters = {
-            "Action":"ReceiveMessage"
-        }
+            "Action":"ReceiveMessage"}
         if visibility_timeout is not None:
             parameters["VisibilityTimeout"] = int(visibility_timeout)
         if int(max_number_of_messages) > 1:
@@ -426,8 +412,7 @@ class AmazonSQS:
         """
         parameters = {
             "Action":"DeleteMessage",
-            "ReceiptHandle":receipt_handle
-        }
+            "ReceiptHandle":receipt_handle}
         d = self._request(parameters, resource=resource)
         d.addCallback(return_true)
         d.addErrback(self._genericErrback)
@@ -453,8 +438,7 @@ class AmazonSQS:
         parameters = {
             "Action":"ChangeMessageVisibility",
             "ReceiptHandle":receipt_handle,
-            "VisibilityTimeout":int(visibility_timeout)
-        }
+            "VisibilityTimeout":int(visibility_timeout)}
         d = self._request(parameters, resource=resource)
         d.addCallback(return_true)
         d.addErrback(self._genericErrback)
@@ -538,16 +522,14 @@ class AmazonSQS:
             "SignatureMethod":"HmacSHA256",
             'Expires':"%s+00:00" % expires.isoformat()[0:19],
             "AWSAccessKeyId":self.aws_access_key_id,
-            "Version":"2009-02-01"
-        }
+            "Version":"2009-02-01"}
         signature_parameters.update(parameters)
         query_string = self._canonicalize(signature_parameters)
         string_to_sign = "%(method)s\n%(host)s\n%(resource)s\n%(qs)s" % {
             "method":method,
             "host":self.host.lower(),
             "resource":resource,
-            "qs":query_string,
-        }
+            "qs":query_string}
         args = [self.aws_secret_access_key, string_to_sign, hashlib.sha256]
         signature = base64.encodestring(hmac.new(*args).digest()).strip()
         signature_parameters.update({'Signature':signature})

@@ -107,8 +107,39 @@ class PageGetterTestCase(unittest.TestCase):
             return True
         except:
             return error
-    
-    def test_05_ExpiresGetPage(self):
+
+    def test_05_ContentSHA1Changed(self):  
+        d = self.pg.getPage(
+            "http://127.0.0.1:8080/random", 
+            confirm_cache_write=True)
+        d.addCallback(self._contentSHA1ChangedCallback)
+        return d
+
+    def _contentSHA1ChangedCallback(self, data):
+        if "content-sha1" in data:
+            content_sha1 = data["content-sha1"]
+            d = self.pg.getPage(
+                "http://127.0.0.1:8080/random", 
+                content_sha1=content_sha1, 
+                confirm_cache_write=True)
+            d.addCallback(self._contentSHA1ChangedCallback2)
+            d.addErrback(self._contentSHA1ChangedErrback)
+            return d
+        else:
+            raise Exception("Data should have Content SHA1 signature.")
+
+    def _contentSHA1ChangedCallback2(self, data):
+        return True
+
+    def _contentSHA1ChangedErrback(self, error):
+        try:
+            error.raiseException()
+        except StaleContentException, e:
+            raise Exception("Pagegetter.getPage() should not have raised StaleContentException")
+        except:
+            return error
+            
+    def test_06_ExpiresGetPage(self):
         d = self.pg.getPage(
             "http://127.0.0.1:8080/expires", 
             confirm_cache_write=True)
@@ -157,7 +188,8 @@ class PageGetterTestCase(unittest.TestCase):
         except:
             return error
             
-    def test_98_ClearCache(self):
+    def test_07_ClearCache(self):
         d = self.pg.clearCache()
         return d     
-        
+    
+    def test_08

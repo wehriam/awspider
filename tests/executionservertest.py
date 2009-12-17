@@ -22,14 +22,14 @@ class ExecutionServerStartTestCase(unittest.TestCase):
             self.__class__.__name__)).hexdigest()
         self.aws_access_key_id = config["aws_access_key_id"]
         self.aws_secret_access_key = config["aws_secret_access_key"]
-        self.aws_s3_cache_bucket = "%s_cache" % self.uuid
+        self.aws_s3_http_cache_bucket = "%s_http_cache" % self.uuid
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
         self.aws_sdb_coordination_domain = "%s_coordination" % self.uuid
         self.executionserver = ExecutionServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
-            aws_s3_cache_bucket = "%s_cache" % self.uuid,
+            aws_s3_http_cache_bucket = self.aws_s3_http_cache_bucket,
             aws_s3_storage_bucket = self.aws_s3_storage_bucket, 
             aws_sdb_reservation_domain = self.aws_sdb_reservation_domain, 
             aws_sdb_coordination_domain = self.aws_sdb_coordination_domain)
@@ -38,7 +38,7 @@ class ExecutionServerStartTestCase(unittest.TestCase):
         s3 = AmazonS3(self.aws_access_key_id, self.aws_secret_access_key)
         sdb = AmazonSDB(self.aws_access_key_id, self.aws_secret_access_key)
         deferreds = []        
-        deferreds.append(s3.deleteBucket(self.aws_s3_cache_bucket)) 
+        deferreds.append(s3.deleteBucket(self.aws_s3_http_cache_bucket))  
         deferreds.append(s3.deleteBucket(self.aws_s3_storage_bucket)) 
         deferreds.append(sdb.deleteDomain(self.aws_sdb_reservation_domain)) 
         deferreds.append(sdb.deleteDomain(self.aws_sdb_coordination_domain))        
@@ -70,14 +70,14 @@ class ExecutionTestCase(unittest.TestCase):
             self.__class__.__name__)).hexdigest()
         self.aws_access_key_id = config["aws_access_key_id"]
         self.aws_secret_access_key = config["aws_secret_access_key"]
-        self.aws_s3_cache_bucket = "%s_cache" % self.uuid
+        self.aws_s3_http_cache_bucket = "%s_http_cache" % self.uuid
         self.aws_s3_storage_bucket = "%s_storage" % self.uuid
         self.aws_sdb_reservation_domain = "%s_reservation" % self.uuid
         self.aws_sdb_coordination_domain = "%s_coordination" % self.uuid
         self.executionserver = ExecutionServer( 
             aws_access_key_id = self.aws_access_key_id, 
             aws_secret_access_key = self.aws_secret_access_key,
-            aws_s3_cache_bucket = "%s_cache" % self.uuid,
+            aws_s3_http_cache_bucket = self.aws_s3_http_cache_bucket,
             aws_s3_storage_bucket = self.aws_s3_storage_bucket, 
             aws_sdb_reservation_domain = self.aws_sdb_reservation_domain, 
             aws_sdb_coordination_domain = self.aws_sdb_coordination_domain)
@@ -94,7 +94,7 @@ class ExecutionTestCase(unittest.TestCase):
         s3 = AmazonS3(self.aws_access_key_id, self.aws_secret_access_key)
         sdb = AmazonSDB(self.aws_access_key_id, self.aws_secret_access_key)
         deferreds = []        
-        deferreds.append(s3.deleteBucket(self.aws_s3_cache_bucket)) 
+        deferreds.append(s3.deleteBucket(self.aws_s3_http_cache_bucket)) 
         deferreds.append(s3.deleteBucket(self.aws_s3_storage_bucket)) 
         deferreds.append(sdb.deleteDomain(self.aws_sdb_reservation_domain)) 
         deferreds.append(sdb.deleteDomain(self.aws_sdb_coordination_domain))       

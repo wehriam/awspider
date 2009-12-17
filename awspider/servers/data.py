@@ -2,7 +2,7 @@ from twisted.internet.defer import Deferred, DeferredList
 from twisted.web import server
 from twisted.internet import reactor
 from .base import BaseServer, LOGGER
-from ..resources2 import DataResource
+from ..resources import DataResource
 
 class DataServer(BaseServer):
     

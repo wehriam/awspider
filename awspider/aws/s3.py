@@ -9,7 +9,7 @@ import xml.etree.cElementTree as ET
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred, DeferredList, deferredGenerator, waitForDeferred
 from ..unicodeconverter import convertToUTF8
-from ..pagegetter import RequestQueuer
+from ..requestqueuer import RequestQueuer
 from .lib import return_true, etree_to_dict
 
 

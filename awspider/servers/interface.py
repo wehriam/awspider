@@ -5,7 +5,7 @@ from twisted.web.resource import Resource
 from twisted.internet import reactor
 from twisted.web import server
 from .base import BaseServer, LOGGER
-from ..resources2 import InterfaceResource, ExposedResource
+from ..resources import InterfaceResource, ExposedResource
 from ..aws import sdb_now
 from ..evaluateboolean import evaluateBoolean
 
@@ -19,8 +19,8 @@ class InterfaceServer(BaseServer):
     def __init__(self,
             aws_access_key_id, 
             aws_secret_access_key, 
-            aws_s3_cache_bucket, 
             aws_sdb_reservation_domain, 
+            aws_s3_http_cache_bucket=None,
             aws_s3_storage_bucket=None,
             aws_sdb_coordination_domain=None,
             max_simultaneous_requests=50,
@@ -44,7 +44,7 @@ class InterfaceServer(BaseServer):
             self,
             aws_access_key_id, 
             aws_secret_access_key, 
-            aws_s3_cache_bucket=aws_s3_cache_bucket, 
+            aws_s3_http_cache_bucket=aws_s3_http_cache_bucket, 
             aws_sdb_reservation_domain=aws_sdb_reservation_domain, 
             aws_s3_storage_bucket=aws_s3_storage_bucket,
             aws_sdb_coordination_domain=aws_sdb_coordination_domain,
