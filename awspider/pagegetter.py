@@ -305,6 +305,7 @@ class PageGetter:
             content_sha1,
             confirm_cache_write,
             http_history=None):
+        LOGGER.critical(error.value.__dict__)
         LOGGER.error("Unable to get request %s for URL %s.\n%s" % (request_hash, url, error))
         if http_history is None:
             http_history = {} 

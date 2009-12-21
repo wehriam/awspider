@@ -5,8 +5,16 @@ from twisted.internet import reactor, ssl
 from twisted.web.client import HTTPClientFactory, _parse
 import dateutil.parser
 from .unicodeconverter import convertToUTF8
+from OpenSSL import SSL
 
-
+class AllCipherSSLClientContextFactory(ssl.ClientContextFactory):
+    """A context factory for SSL clients that uses all ciphers."""
+    
+    def getContext(self):
+        context = SSL.Context(self.method)
+        context.set_cipher_list("ALL")
+        return context
+    
 class RequestQueuer(object):
     
     """
@@ -270,12 +278,11 @@ class RequestQueuer(object):
             followRedirect=req['follow_redirect']
         )
         if scheme == 'https':
-            context_factory = ssl.ClientContextFactory()
             reactor.connectSSL(
                                     host, 
                                     port, 
                                     factory, 
-                                    context_factory, 
+                                    AllCipherSSLClientContextFactory(), 
                                     timeout=req['timeout']
                                 )
         else:

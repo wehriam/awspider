@@ -449,6 +449,11 @@ class ExecutionServer(BaseServer):
                     reserved_arguments[key] = data[uuid][key][0]
                 else:
                     kwargs_raw[key] = data[uuid][key][0]
+            # Check to make sure the custom function is present.
+            function_name = reserved_arguments["reservation_function_name"]
+            if function_name not in self.functions:
+                LOGGER.error("Unable to process function %s for UUID: %s" % (function_name, uuid))
+                continue
             # Check for the presence of all required system attributes.
             if "reservation_function_name" not in reserved_arguments:
                 LOGGER.error("Reservation %s does not have a function name." % uuid)
@@ -465,11 +470,6 @@ class ExecutionServer(BaseServer):
             if "reservation_error" not in reserved_arguments:
                 LOGGER.error("Reservation %s, %s does not have an error flag." % (function_name, uuid))
                 self.deleteReservation( uuid, function_name=function_name )
-                continue
-            # Check to make sure the custom function is present.
-            function_name = reserved_arguments["reservation_function_name"]
-            if function_name not in self.functions:
-                LOGGER.error("Unable to process function %s for UUID: %s" % (function_name, uuid))
                 continue
             # Load custom function.
             if function_name in self.functions:
@@ -529,7 +529,6 @@ class ExecutionServer(BaseServer):
                 replace=["reservation_next_request"])
             d.addCallback(self._setNextRequestCallback, function_name, uuid)
             d.addErrback(self._setNextRequestErrback, function_name, uuid)
-            self.active_jobs[uuid] = True
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 

@@ -189,3 +189,70 @@ class InterfaceServer(BaseServer):
     def showReservation(self, uuid):
         d = self.sdb.getAttributes(self.aws_sdb_reservation_domain, uuid)
         return d
+    
+    def executeReservation(self, uuid):
+        sql = "SELECT * FROM `%s` WHERE itemName() = '%s'" % (self.aws_sdb_reservation_domain, uuid)
+        LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
+        d = self.sdb.select(sql)
+        d.addCallback(self._executeReservationCallback)
+        d.addErrback(self._executeReservationErrback)        
+        return d
+    
+    def _executeReservationCallback(self, data):
+        print data
+        uuid = data.keys()[0]
+        kwargs_raw = {}
+        reserved_arguments = {}
+        # Load attributes into dicts for use by the system or custom functions.
+        for key in data[uuid]:
+            if key in self.reserved_arguments:
+                reserved_arguments[key] = data[uuid][key][0]
+            else:
+                kwargs_raw[key] = data[uuid][key][0]
+        # Check to make sure the custom function is present.
+        function_name = reserved_arguments["reservation_function_name"]
+        if function_name not in self.functions:
+            raise Exception("Unable to process function %s for UUID: %s" % (function_name, uuid))
+            return
+        # Check for the presence of all required system attributes.
+        if "reservation_function_name" not in reserved_arguments:
+            raise Exception("Reservation %s does not have a function name." % uuid)
+            self.deleteReservation(uuid)
+            return
+        if "reservation_created" not in reserved_arguments:
+            raise Exception("Reservation %s, %s does not have a created time." % (function_name, uuid))
+            self.deleteReservation( uuid, function_name=function_name )
+            return
+        if "reservation_next_request" not in reserved_arguments:
+            raise Exception("Reservation %s, %s does not have a next request time." % (function_name, uuid))
+            self.deleteReservation( uuid, function_name=function_name )
+            return                
+        if "reservation_error" not in reserved_arguments:
+            raise Exception("Reservation %s, %s does not have an error flag." % (function_name, uuid))
+            self.deleteReservation( uuid, function_name=function_name )
+            return
+        # Load custom function.
+        if function_name in self.functions:
+            exposed_function = self.functions[function_name]
+        else:
+            raise Exception("Could not find function %s." % function_name)
+            return
+        # Check for required / optional arguments.
+        kwargs = {}
+        for key in kwargs_raw:
+            if key in exposed_function["required_arguments"]:
+                kwargs[key] = kwargs_raw[key]
+            if key in exposed_function["optional_arguments"]:
+                kwargs[key] = kwargs_raw[key]
+        has_reqiured_arguments = True
+        for key in exposed_function["required_arguments"]:
+            if key not in kwargs:
+                has_reqiured_arguments = False
+                raise Exception("%s, %s does not have required argument %s." % (function_name, uuid, key))
+        LOGGER.debug("Executing function.\n%s" % function_name)
+        return self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
+        
+    def _executeReservationErrback(self, error):
+        LOGGER.error("Unable to query SimpleDB.\n%s" % error)
+    
+    

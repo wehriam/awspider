@@ -183,6 +183,8 @@ class BaseServer(object):
             raise Exception(message)
     
     def callExposedFunction(self, func, kwargs, function_name, uuid=None):
+        if uuid is not None:
+            self.active_jobs[uuid] = True
         d = maybeDeferred(func, **kwargs)
         d.addCallback(self._callExposedFunctionCallback, function_name, uuid)
         d.addErrback(self._callExposedFunctionErrback, function_name, uuid)
