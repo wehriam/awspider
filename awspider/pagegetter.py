@@ -5,6 +5,7 @@ import dateutil.parser
 import hashlib
 import logging
 import time
+from twisted.internet.defer import maybeDeferred
 from .requestqueuer import RequestQueuer
 from .unicodeconverter import convertToUTF8, convertToUnicode
 
@@ -198,8 +199,11 @@ class PageGetter:
             confirm_cache_write):
         LOGGER.debug("Got S3 Head object request %s for URL %s." % (request_hash, url))
         http_history = {}
+        #if "content-length" in data["headers"] and int(data["headers"]["content-length"][0]) == 0:
+        #    raise Exception("Zero Content length, do not use as cache.")
         if "content-sha1" in data["headers"]:
             http_history["content-sha1"] = data["headers"]["content-sha1"][0]
+        # Filter?
         if "request-failures" in data["headers"]:
             http_history["request-failures"] = data["headers"]["request-failures"][0].split(",")
         if "content-changes" in data["headers"]:
@@ -262,12 +266,14 @@ class PageGetter:
             http_history=None):
         LOGGER.debug("Got request %s for URL %s." % (request_hash, url))
         data["pagegetter-cache-hit"] = False
-        return self._storeData(
+        d = maybeDeferred(self._storeData,
             data, 
             request_hash, 
             content_sha1, 
             confirm_cache_write,
             http_history=http_history)
+        d.addErrback(self._storeDataErrback, data)
+        return d
 
     def _requestWithNoCacheHeaders(self, 
             error, 
@@ -407,6 +413,8 @@ class PageGetter:
             content_sha1, 
             confirm_cache_write,
             http_history=None):
+        if len(data["response"]) == 0:
+            return self._storeDataErrback(Failure(exc_value=Exception("Response data is of length 0")), response_data)
         data["content-sha1"] = hashlib.sha1(data["response"]).hexdigest()
         if http_history is None:
             http_history = {} 
@@ -419,6 +427,7 @@ class PageGetter:
         http_history["content-changes"] = http_history["content-changes"][-10:]
         LOGGER.debug("Writing data for request %s to S3." % request_hash)
         headers = {}
+        http_history["content-changes"] = filter(lambda x:len(x) > 0, http_history["content-changes"])
         headers["content-changes"] = ",".join(http_history["content-changes"])
         headers["content-sha1"] = data["content-sha1"]
         if "cache-control" in data["headers"]: 
@@ -446,5 +455,8 @@ class PageGetter:
         return data
         
     def _storeDataCallback(self, data, response_data):
+        return response_data
+    
+    def _storeDataErrback(self, error, response_data):
         return response_data
 

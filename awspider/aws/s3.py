@@ -3,6 +3,7 @@ import gzip as gzip_package
 import base64
 import hmac
 import hashlib
+import logging
 import time
 import urllib
 import xml.etree.cElementTree as ET
@@ -14,7 +15,7 @@ from .lib import return_true, etree_to_dict
 
 
 S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
-
+LOGGER = logging.getLogger("main")
 
 class AmazonS3:
     """
@@ -23,7 +24,8 @@ class AmazonS3:
    
     ACCEPTABLE_ERROR_CODES = [400, 403, 404, 409]
     host = "s3.amazonaws.com"
-   
+    reserved_headers = ["x-amz-id-2", "x-amz-request-id", "date", "last-modified", "etag", "content-type", "content-length", "server"]
+    
     def __init__(self, aws_access_key_id, aws_secret_access_key, rq=None):
         """
         **Arguments:**
@@ -201,6 +203,11 @@ class AmazonS3:
         """
         Remove custom header prefix from header dictionary keys.
         """
+        for key in keys:
+            if ("x-amz-meta-%s" % key.lower()) in self.reserved_headers:
+                message = "Header %s is reserved for use by Amazon S3." % key
+                LOGGER.critical(message)
+                raise Exception(message)
         keys = headers.keys()
         values = headers.values()
         meta = "x-amz-meta-"
@@ -240,6 +247,11 @@ class AmazonS3:
         """
         keys = headers.keys()
         values = headers.values()
+        for key in keys:
+            if key.lower() in self.reserved_headers:
+                message = "Header %s is reserved for use by Amazon S3." % key
+                LOGGER.critical(message)
+                raise Exception(message)
         meta = "x-amz-meta-"
         return dict(zip(["%s%s" % (meta, x) for x in keys], values))
        
