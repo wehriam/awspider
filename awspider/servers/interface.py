@@ -123,7 +123,7 @@ class InterfaceServer(BaseServer):
                     function_name = key
                     break
         if function_name not in self.functions:
-            raise Exception("Function %s does not exist." % function_name )
+            raise Exception("Function %s does not exist." % function_name)
         function = self.functions[function_name]
         filtered_kwargs = {}
         for key in function["required_arguments"]:
@@ -131,7 +131,7 @@ class InterfaceServer(BaseServer):
                 #filtered_kwargs[key] = convertToUTF8(kwargs[key])
                 filtered_kwargs[key] = kwargs[key]
             else:
-                raise Exception("Required parameter '%s' not found. Required parameters are %s. Optional parameters are %s." % (key, function["required_arguments"], function["optional_arguments"] ))
+                raise Exception("Required parameter '%s' not found. Required parameters are %s. Optional parameters are %s." % (key, function["required_arguments"], function["optional_arguments"]))
         for key in function["optional_arguments"]:
             if key in kwargs:
                 #filtered_kwargs[key] = convertToUTF8(kwargs[key])
@@ -166,11 +166,11 @@ class InterfaceServer(BaseServer):
             return d
             
     def _createReservationCallback(self, data, function_name, uuid):
-        LOGGER.debug( "Created reservation on SimpleDB for %s, %s." % (function_name, uuid))
+        LOGGER.debug("Created reservation on SimpleDB for %s, %s." % (function_name, uuid))
         return uuid
 
     def _createReservationErrback(self, error, function_name, uuid):
-        LOGGER.error( "Unable to create reservation on SimpleDB for %s:%s, %s.\n" % (function_name, uuid, error) )
+        LOGGER.error("Unable to create reservation on SimpleDB for %s:%s, %s.\n" % (function_name, uuid, error))
         return error
 
     def _createReservationCallback2(self, data, function_name, uuid):
@@ -182,8 +182,8 @@ class InterfaceServer(BaseServer):
         else:
             return {data[0][1]:data[1][1]}
 
-    def _createReservationErrback2( self, error, function_name, uuid ):
-        LOGGER.error( "Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error) )
+    def _createReservationErrback2(self, error, function_name, uuid):
+        LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
         return error
     
     def showReservation(self, uuid):
@@ -199,7 +199,8 @@ class InterfaceServer(BaseServer):
         return d
     
     def _executeReservationCallback(self, data):
-        print data
+        if len(data) == 0:
+            raise Exception("Could not find reservation.")
         uuid = data.keys()[0]
         kwargs_raw = {}
         reserved_arguments = {}
@@ -216,21 +217,17 @@ class InterfaceServer(BaseServer):
             return
         # Check for the presence of all required system attributes.
         if "reservation_function_name" not in reserved_arguments:
-            raise Exception("Reservation %s does not have a function name." % uuid)
             self.deleteReservation(uuid)
-            return
+            raise Exception("Reservation %s does not have a function name." % uuid)
         if "reservation_created" not in reserved_arguments:
+            self.deleteReservation(uuid, function_name=function_name)
             raise Exception("Reservation %s, %s does not have a created time." % (function_name, uuid))
-            self.deleteReservation( uuid, function_name=function_name )
-            return
         if "reservation_next_request" not in reserved_arguments:
+            self.deleteReservation(uuid, function_name=function_name)
             raise Exception("Reservation %s, %s does not have a next request time." % (function_name, uuid))
-            self.deleteReservation( uuid, function_name=function_name )
-            return                
         if "reservation_error" not in reserved_arguments:
+            self.deleteReservation(uuid, function_name=function_name)
             raise Exception("Reservation %s, %s does not have an error flag." % (function_name, uuid))
-            self.deleteReservation( uuid, function_name=function_name )
-            return
         # Load custom function.
         if function_name in self.functions:
             exposed_function = self.functions[function_name]
