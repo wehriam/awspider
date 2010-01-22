@@ -155,8 +155,7 @@ class PageGetter:
             d = self.rq.getPage(url, **request_kwargs)
             d.addCallback(
                 self._storeData, 
-                request_hash, 
-                content_sha1, 
+                request_hash,  
                 confirm_cache_write)
             d.addCallback(self._checkForStaleContent, content_sha1, request_hash)
             return d
