@@ -85,6 +85,7 @@ class PageGetterTestCase(unittest.TestCase):
         return d
     
     def _contentSHA1Callback(self, data):
+        print data
         if "content-sha1" in data:
             content_sha1 = data["content-sha1"]
             d = self.pg.getPage(
@@ -98,6 +99,7 @@ class PageGetterTestCase(unittest.TestCase):
             raise Exception("Data should have Content SHA1 signature.")
     
     def _contentSHA1Callback2(self, data):
+        print data
         raise Exception("Pagegetter.getPage() should have raised StaleContentException")
     
     def _contentSHA1Errback(self, error):
@@ -192,4 +194,3 @@ class PageGetterTestCase(unittest.TestCase):
         d = self.pg.clearCache()
         return d     
     
-    def test_08

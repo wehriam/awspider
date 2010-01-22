@@ -29,9 +29,10 @@ class RequestQueuer(object):
     active_reqs = {}
     # Dictionary of user specified minimum request intervals, by host
     min_req_interval_per_hosts = {}
+    max_reqs_per_hosts_per_sec = {}
     # Dictionary of user specified maximum simultaneous requests, by host
     max_simul_reqs_per_hosts = {}
-
+    
     def __init__(self, max_simultaneous_requests=50,
                  max_requests_per_host_per_second=1,
                  max_simultaneous_requests_per_host=5): 
@@ -54,12 +55,13 @@ class RequestQueuer(object):
             ``setHostMaxSimultaneousRequests()`` (Default 5)
   
         """
-        if max_requests_per_host_per_second == 0:
+        if max_simultaneous_requests == 0:
             self.max_simul_reqs = 100000
         else:
             self.max_simul_reqs = int(max_simultaneous_requests)
         # self.min_req_interval_per_host is the global minimum request
         # interval. Can be overridden by self.min_req_interval_per_hosts[].
+        self.max_reqs_per_host_per_sec = max_requests_per_host_per_second
         if max_requests_per_host_per_second == 0:
             self.min_req_interval_per_host = 0
         else:
@@ -108,11 +110,24 @@ class RequestQueuer(object):
            than 1 request per second to the host. If set to 0, RequestQueuer 
            will not limit the request rate to the host.
         """        
+        self.max_reqs_per_hosts_per_sec[host] = max_requests_per_second
         if max_requests_per_second == 0:
             self.min_req_interval_per_hosts[host] = 0
         else:
             min_req_interval = 1.0 / float(max_requests_per_second)
             self.min_req_interval_per_hosts[host] = min_req_interval
+
+    def getHostMaxRequestsPerSecond(self, host):
+        """
+        Get the maximum number of requests per second for a particular host.
+        
+        **Arguments:**
+         * *host* -- Hostname. (Example, ``"google.com"``)
+        """       
+        if host in self.max_reqs_per_hosts_per_sec:
+            return self.max_reqs_per_hosts_per_sec[host]
+        else:
+            return self.max_reqs_per_host_per_sec
 
     def setHostMaxSimultaneousRequests(self, host, max_simultaneous_requests):
         """
@@ -128,8 +143,20 @@ class RequestQueuer(object):
         if max_simultaneous_requests == 0:
             self.max_simul_reqs_per_hosts[host] = self.max_simul_reqs
         else:
-            self.max_simul_reqs_per_hosts[host] = max_simultaneous_requests
-
+            self.max_simul_reqs_per_hosts[host] = int(max_simultaneous_requests)
+            
+    def getHostMaxSimultaneousRequests(self, host):
+        """
+        Get the maximum number of simultaneous requests for a particular host.
+        
+        **Arguments:**
+         * *host* -- Hostname. (Example, ``"google.com"``)
+        """        
+        if host in self.max_simul_reqs_per_hosts:
+            return self.max_simul_reqs_per_hosts[host]
+        else:
+            return self.max_simul_reqs_per_host
+        
     def getPage(self, 
                 url, 
                 last_modified=None, 

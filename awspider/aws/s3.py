@@ -203,7 +203,7 @@ class AmazonS3:
         """
         Remove custom header prefix from header dictionary keys.
         """
-        for key in keys:
+        for key in headers.keys():
             if ("x-amz-meta-%s" % key.lower()) in self.reserved_headers:
                 message = "Header %s is reserved for use by Amazon S3." % key
                 LOGGER.critical(message)

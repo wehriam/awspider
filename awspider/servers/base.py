@@ -345,3 +345,22 @@ class BaseServer(object):
             
     def _deleteHTTPCacheCallback2(self, data):
         return True
+
+    def getServerData(self):    
+        running_time = time.time() - self.start_time
+        cost = (self.sdb.box_usage * .14) * (60*60*24*30.4) / (running_time)
+        active_requests_by_host = self.rq.getActiveRequestsByHost()
+        pending_requests_by_host = self.rq.getPendingRequestsByHost()
+        data = {
+            "load_avg":os.getloadavg(),
+            "running_time":running_time,
+            "cost":cost,
+            "active_requests_by_host":active_requests_by_host,
+            "pending_requests_by_host":pending_requests_by_host,
+            "active_requests":self.rq.getActive(),
+            "pending_requests":self.rq.getPending(),
+            "current_timestamp":sdb_now(offset=self.time_offset)
+        }
+        LOGGER.debug("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
+        return data
+        

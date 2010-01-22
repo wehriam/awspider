@@ -40,7 +40,7 @@ class NetworkAddressGetter():
     public_ip = None
     
     def __init__( self ):
-        self.ip_functions = [self.getDomaintools, self.getShowmyip, self.getIPPages, self.getIPLocationtools]
+        self.ip_functions = [self.getDomaintools, self.getIPPages]
         random.shuffle(self.ip_functions)
     
     def __call__( self ):
@@ -108,18 +108,6 @@ class NetworkAddressGetter():
         else:
             response["local_ip"] = socket.gethostbyname(socket.gethostname())
         return response
-    
-    def getIPLocationtools(self):
-        logger.debug( "Getting public IP from iplocationtools.com." )
-        d = getPage( "http://iplocationtools.com/ip_query.php", timeout=5 )
-        d.addCallback( self._getIPLocationtoolsCallback )
-        return d       
-
-    def _getIPLocationtoolsCallback(self, data ):
-        domaintools_xml = ET.XML( data )
-        public_ip = domaintools_xml.find("Ip").text
-        logger.debug( "Got public IP %s from iplocationtools.com." % public_ip ) 
-        return public_ip
 
     def getIPPages(self):
         logger.debug( "Getting public IP from ippages.com." )
@@ -145,17 +133,6 @@ class NetworkAddressGetter():
         logger.debug( "Got public IP %s from domaintools.com." % public_ip ) 
         return public_ip
             
-    def getShowmyip(self):     
-        logger.debug( "Getting public IP from showmyip.com." )
-        d = getPage( "http://www.showmyip.com/xml/", timeout=5  )
-        d.addCallback( self._getShowmyipCallback )
-        return d
-        
-    def _getShowmyipCallback(self, data ):
-        showmyip_xml = ET.XML( data )
-        public_ip = showmyip_xml.find("ip").text
-        logger.debug( "Got public IP %s from showmyip.com." % public_ip )
-        return public_ip
 
 def getNetworkAddress():
     n = NetworkAddressGetter()

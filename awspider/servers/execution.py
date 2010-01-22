@@ -359,23 +359,6 @@ class ExecutionServer(BaseServer):
         LOGGER.error(args[0] + ":" + str(error))
         return self.pg.getPage(*args, **kwargs)
 
-    def getServerData(self):    
-        running_time = time.time() - self.start_time
-        cost = (self.sdb.box_usage * .14) * (60*60*24*30.4) / (running_time)
-        active_requests_by_host = self.rq.getActiveRequestsByHost()
-        pending_requests_by_host = self.rq.getPendingRequestsByHost()
-        data = {
-            "running_time":running_time,
-            "cost":cost,
-            "active_requests_by_host":active_requests_by_host,
-            "pending_requests_by_host":pending_requests_by_host,
-            "active_requests":self.rq.getActive(),
-            "pending_requests":self.rq.getPending(),
-            "current_timestamp":sdb_now(offset=self.time_offset)
-        }
-        LOGGER.debug("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
-        return data
-
     def queryByUUID(self, uuid):
         sql = "SELECT * FROM `%s` WHERE itemName() = '%s'" % (self.aws_sdb_reservation_domain, uuid)
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)

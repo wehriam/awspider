@@ -2,6 +2,7 @@
 Twisted API for Amazon's various web services.
 """
 
+from .productadvertising import AmazonProductAdvertising
 from .s3 import AmazonS3
 from .sqs import AmazonSQS
 from .sdb import AmazonSDB
