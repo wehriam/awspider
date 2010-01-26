@@ -201,12 +201,12 @@ class BaseServer(object):
                 func, 
                 kwargs, 
                 function_name, 
-                uuid=None)
+                uuid=uuid)
             d.addErrback(self._reservationCacheErrback, 
                 func, 
                 kwargs, 
                 function_name, 
-                uuid=None)
+                uuid=uuid)
             return d
         elif self.functions[function_name]["check_reservation_cache"]:
             kwargs["reservation_cache"] = None
