@@ -436,6 +436,8 @@ class BaseServer(object):
         return cPickle.loads(data["response"])
     
     def setReservationCache(self, uuid, data):
+        if uuid is None:
+            return None
         if self.aws_s3_reservation_cache_bucket is None:
             raise ReservationCachingException("No reservation cache bucket is specified.")
         d = self.s3.putObject(
