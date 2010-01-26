@@ -39,6 +39,7 @@ class ExecutionServer(BaseServer):
             aws_s3_http_cache_bucket=None, 
             aws_s3_storage_bucket=None,
             aws_sdb_coordination_domain=None,
+            aws_s3_reservation_cache_bucket=None,
             max_simultaneous_requests=150,
             max_requests_per_host_per_second=1,
             max_simultaneous_requests_per_host=5,
@@ -50,7 +51,7 @@ class ExecutionServer(BaseServer):
             time_offset=None,
             peer_check_interval=60,
             reservation_check_interval=60,
-            hammer_prevention=True):
+            hammer_prevention=False):
         if name == None:
             name = "AWSpider Execution Server UUID: %s" % self.uuid
         self.network_information["port"] = port
@@ -63,6 +64,7 @@ class ExecutionServer(BaseServer):
             self,
             aws_access_key_id, 
             aws_secret_access_key, 
+            aws_s3_reservation_cache_bucket=aws_s3_reservation_cache_bucket,
             aws_s3_http_cache_bucket=aws_s3_http_cache_bucket, 
             aws_sdb_reservation_domain=aws_sdb_reservation_domain, 
             aws_s3_storage_bucket=aws_s3_storage_bucket,

@@ -8,15 +8,10 @@ import time
 from twisted.internet.defer import maybeDeferred
 from .requestqueuer import RequestQueuer
 from .unicodeconverter import convertToUTF8, convertToUnicode
-
+from .exceptions import StaleContentException
 
 class ReportedFailure(twisted.python.failure.Failure):
     pass
-
-
-class StaleContentException(Exception):
-    pass
-
 
 # A UTC class.
 class CoordinatedUniversalTime(datetime.tzinfo):

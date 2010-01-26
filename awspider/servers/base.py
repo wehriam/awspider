@@ -17,6 +17,8 @@ from ..timeoffset import getTimeOffset
 
 LOGGER = logging.getLogger("main")
 
+class ReservationCachingException(Exception):
+    pass
 
 class BaseServer(object):
     
@@ -38,6 +40,7 @@ class BaseServer(object):
                  aws_s3_http_cache_bucket=None, 
                  aws_sdb_reservation_domain=None, 
                  aws_s3_storage_bucket=None,
+                 aws_s3_reservation_cache_bucket=None,
                  aws_sdb_coordination_domain=None,
                  max_simultaneous_requests=0,
                  max_requests_per_host_per_second=0,
@@ -60,6 +63,7 @@ class BaseServer(object):
             max_simultaneous_requests_per_host=int(max_simultaneous_requests_per_host))
         self.rq.setHostMaxRequestsPerSecond("127.0.0.1", 0)
         self.rq.setHostMaxSimultaneousRequests("127.0.0.1", 0)
+        self.aws_s3_reservation_cache_bucket = aws_s3_reservation_cache_bucket
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.aws_s3_http_cache_bucket = aws_s3_http_cache_bucket
@@ -116,6 +120,9 @@ class BaseServer(object):
     def _baseStart(self):
         LOGGER.critical("Checking S3 and SDB setup.")
         deferreds = []
+        if self.aws_s3_reservation_cache_bucket is not None:
+            deferreds.append(
+                self.s3.checkAndCreateBucket(self.aws_s3_reservation_cache_bucket))            
         if self.aws_s3_http_cache_bucket is not None:
             deferreds.append(
                 self.s3.checkAndCreateBucket(self.aws_s3_http_cache_bucket))
@@ -174,7 +181,7 @@ class BaseServer(object):
 
     def _getTimeOffsetCallback(self, time_offset):
         self.time_offset = time_offset
-        LOGGER.info( "Got time offset for sync: %s" % self.time_offset )
+        LOGGER.info("Got time offset for sync: %s" % self.time_offset)
 
     def _getTimeOffsetErrback(self, error):
         if self.time_offset is None:
@@ -185,11 +192,45 @@ class BaseServer(object):
     def callExposedFunction(self, func, kwargs, function_name, uuid=None):
         if uuid is not None:
             self.active_jobs[uuid] = True
+        if self.functions[function_name]["get_reservation_uuid"]:
+            kwargs["reservation_uuid"] = uuid 
+        if self.functions[function_name]["check_reservation_cache"] and \
+                self.aws_s3_reservation_cache_bucket is not None:
+            d = self.getReservationCache(uuid)
+            d.addCallback(self._reservationCacheCallback, 
+                func, 
+                kwargs, 
+                function_name, 
+                uuid=None)
+            d.addErrback(self._reservationCacheErrback, 
+                func, 
+                kwargs, 
+                function_name, 
+                uuid=None)
+            return d
+        elif self.functions[function_name]["check_reservation_cache"]:
+            kwargs["reservation_cache"] = None
         d = maybeDeferred(func, **kwargs)
         d.addCallback(self._callExposedFunctionCallback, function_name, uuid)
         d.addErrback(self._callExposedFunctionErrback, function_name, uuid)
         return d
-
+        
+    def _reservationCacheCallback(self, data, func, kwargs, function_name, uuid):
+        LOGGER.debug("Got reservation cache for %s" % uuid)
+        kwargs["reservation_cache"] = data
+        d = maybeDeferred(func, **kwargs)
+        d.addCallback(self._callExposedFunctionCallback, function_name, uuid)
+        d.addErrback(self._callExposedFunctionErrback, function_name, uuid)
+        return d
+        
+    def _reservationCacheErrback(self, error, func, kwargs, function_name, uuid):
+        LOGGER.debug("Could not get reservation cache for %s" % uuid)
+        kwargs["reservation_cache"] = None
+        d = maybeDeferred(func, **kwargs)
+        d.addCallback(self._callExposedFunctionCallback, function_name, uuid)
+        d.addErrback(self._callExposedFunctionErrback, function_name, uuid)
+        return d
+        
     def _callExposedFunctionErrback(self, error, function_name, uuid):
         if uuid is not None:
             del self.active_jobs[uuid]
@@ -260,6 +301,22 @@ class BaseServer(object):
             kwarg_defaults = []
         required_arguments = arguments[0:len(arguments) - len(kwarg_defaults)]
         optional_arguments = arguments[len(arguments) - len(kwarg_defaults):]
+        if "reservation_cache" in required_arguments:
+            del required_arguments[required_arguments.index("reservation_cache")]
+            check_reservation_cache = True
+        elif "reservation_cache" in optional_arguments:
+            del optional_arguments[optional_arguments.index("reservation_cache")]
+            check_reservation_cache = True
+        else:
+            check_reservation_cache = False
+        if "reservation_uuid" in required_arguments:
+            del required_arguments[required_arguments.index("reservation_uuid")]
+            get_reservation_uuid = True
+        elif "reservation_uuid" in optional_arguments:
+            del optional_arguments[optional_arguments.index("reservation_uuid")]
+            get_reservation_uuid = True
+        else:
+            get_reservation_uuid = False
         # Get function name, usually class/method
         if name is not None:
             function_name = name
@@ -287,7 +344,9 @@ class BaseServer(object):
             "function":func,
             "interval":interval,
             "required_arguments":required_arguments,
-            "optional_arguments":optional_arguments
+            "optional_arguments":optional_arguments,
+            "check_reservation_cache":check_reservation_cache,
+            "get_reservation_uuid":get_reservation_uuid
         }
         LOGGER.info("Function %s is now callable." % function_name)
         return function_name
@@ -363,4 +422,25 @@ class BaseServer(object):
         }
         LOGGER.debug("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
         return data
+    
+    def getReservationCache(self, uuid):
+        if self.aws_s3_reservation_cache_bucket is None:
+            raise ReservationCachingException("No reservation cache bucket is specified.")        
+        d = self.s3.getObject(
+            self.aws_s3_reservation_cache_bucket,
+            uuid)
+        d.addCallback(self._getReservationCacheCallback)
+        return d    
+    
+    def _getReservationCacheCallback(self, data):
+        return cPickle.loads(data["response"])
+    
+    def setReservationCache(self, uuid, data):
+        if self.aws_s3_reservation_cache_bucket is None:
+            raise ReservationCachingException("No reservation cache bucket is specified.")
+        d = self.s3.putObject(
+            self.aws_s3_reservation_cache_bucket,
+            uuid,
+            cPickle.dumps(data))
+        return d
         
