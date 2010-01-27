@@ -3,7 +3,7 @@ import time
 import pprint
 from twisted.web.client import _parse
 from uuid import uuid5, NAMESPACE_DNS
-from twisted.internet.defer import Deferred, DeferredList
+from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 from twisted.internet import task
 from twisted.internet import reactor
 from twisted.web import server
@@ -106,13 +106,20 @@ class ExecutionServer(BaseServer):
             self.reportjobspeedloop.start(60)
             self.jobsloop = task.LoopingCall(self.executeJobs)
             self.jobsloop.start(1)
-            self.queryloop = task.LoopingCall(self.query)
-            self.queryloop.start(self.reservation_check_interval)
             if self.aws_sdb_coordination_domain is not None:
-                self.coordinateloop = task.LoopingCall(self.coordinate)
-                self.coordinateloop.start(self.peer_check_interval)  
-                self.peerCheckRequest()
-        
+                self.peerCheckRequest()  
+                d = maybeDeferred(self.coordinate)
+                d.addCallback(self._startCallback3)
+            else:
+                self.queryloop = task.LoopingCall(self.query)
+                self.queryloop.start(self.reservation_check_interval)
+    
+    def _startCallback3(self, data):
+        self.coordinateloop = task.LoopingCall(self.coordinate)
+        self.coordinateloop.start(self.peer_check_interval)
+        self.queryloop = task.LoopingCall(self.query)
+        self.queryloop.start(self.reservation_check_interval)
+    
     def shutdown(self):
         LOGGER.critical("Shutting down.")
         self.job_queue = []
@@ -206,8 +213,9 @@ class ExecutionServer(BaseServer):
             replace=attributes.keys())
         d.addCallback(self._coordinateCallback)
         d.addErrback(self._coordinateErrback)
+        return d
         
-    def _coordinateCallback( self, data ):
+    def _coordinateCallback(self, data):
         sql = "SELECT public_ip, local_ip, port FROM `%s` WHERE created > '%s'" % (
             self.aws_sdb_coordination_domain, 
             sdb_now_add(self.peer_check_interval * -2, 
@@ -216,7 +224,8 @@ class ExecutionServer(BaseServer):
         d = self.sdb.select(sql)
         d.addCallback(self._coordinateCallback2)
         d.addErrback(self._coordinateErrback)
-
+        return d
+        
     def _coordinateCallback2(self, discovered):
         existing_peers = set(self.peers.keys())
         discovered_peers = set(discovered.keys())
@@ -241,6 +250,7 @@ class ExecutionServer(BaseServer):
             if len(deferreds) > 0:
                 d = DeferredList(deferreds, consumeErrors=True)
                 d.addCallback(self._coordinateCallback3)
+                return d
             else:
                 self._coordinateCallback3(None) #Just found ourself.
         elif len(old_peers) > 0:
@@ -434,15 +444,14 @@ class ExecutionServer(BaseServer):
                     reserved_arguments[key] = data[uuid][key][0]
                 else:
                     kwargs_raw[key] = data[uuid][key][0]
-            # Check to make sure the custom function is present.
-            function_name = reserved_arguments["reservation_function_name"]
-            if function_name not in self.functions:
-                LOGGER.error("Unable to process function %s for UUID: %s" % (function_name, uuid))
-                continue
             # Check for the presence of all required system attributes.
             if "reservation_function_name" not in reserved_arguments:
                 LOGGER.error("Reservation %s does not have a function name." % uuid)
                 self.deleteReservation(uuid)
+                continue
+            function_name = reserved_arguments["reservation_function_name"]
+            if function_name not in self.functions:
+                LOGGER.error("Unable to process function %s for UUID: %s" % (function_name, uuid))
                 continue
             if "reservation_created" not in reserved_arguments:
                 LOGGER.error("Reservation %s, %s does not have a created time." % (function_name, uuid))
@@ -477,12 +486,16 @@ class ExecutionServer(BaseServer):
             if not has_reqiured_arguments:
                 continue
             self.queued_jobs[uuid] = True
-            self.job_queue.append({
-                "exposed_function":exposed_function,
+            job = {"exposed_function":exposed_function,
                 "kwargs":kwargs,
                 "function_name":function_name,
-                "uuid":uuid
-            })
+                "uuid":uuid}
+            if "reservation_cache" in reserved_arguments:
+                LOGGER.debug("Using reservation fast cache for %s, %s on on SimpleDB." % (function_name, uuid))
+                job["reservation_cache"] = reserved_arguments["reservation_cache"]
+            else:
+                job["reservation_cache"] = None
+            self.job_queue.append(job)
         self.executeJobs()
     
     def reportJobSpeed(self):
@@ -503,30 +516,38 @@ class ExecutionServer(BaseServer):
             # Call the function.
             LOGGER.debug("Calling %s with args %s" % (function_name, kwargs))
             # Schedule the next request.
-            reservation_next_request_parameters = {
-                "reservation_next_request":sdb_now_add(
-                    exposed_function["interval"], 
-                    offset=self.time_offset)}
-            d = self.sdb.putAttributes(
-                self.aws_sdb_reservation_domain, 
-                uuid, 
-                reservation_next_request_parameters, 
-                replace=["reservation_next_request"])
-            d.addCallback(self._setNextRequestCallback, function_name, uuid)
-            d.addErrback(self._setNextRequestErrback, function_name, uuid)
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
                 function_name, 
-                uuid)
+                uuid=uuid,
+                reservation_fast_cache=job["reservation_cache"])
             d.addCallback(self._jobCountCallback)
             d.addErrback(self._jobCountErrback)
+            d.addCallback(self._setNextRequest, uuid, exposed_function["interval"], function_name)
             
     def _jobCountCallback(self, data):
         self.job_count += 1
         
     def _jobCountErrback(self, error):
         self.job_count += 1
+    
+    def _setNextRequest(self, data, uuid, exposed_function_interval, function_name):
+        reservation_next_request_parameters = {
+            "reservation_next_request":sdb_now_add(
+                exposed_function_interval, 
+                offset=self.time_offset)}
+        if uuid in self.reservation_fast_caches:
+            LOGGER.debug("Set reservation fast cache for %s, %s on on SimpleDB." % (function_name, uuid))
+            reservation_next_request_parameters["reservation_cache"] = self.reservation_fast_caches[uuid]
+            del self.reservation_fast_caches[uuid]
+        d = self.sdb.putAttributes(
+            self.aws_sdb_reservation_domain, 
+            uuid, 
+            reservation_next_request_parameters, 
+            replace=["reservation_next_request", "reservation_cache"])
+        d.addCallback(self._setNextRequestCallback, function_name, uuid)
+        d.addErrback(self._setNextRequestErrback, function_name, uuid)
         
     def _setNextRequestCallback(self, data, function_name, uuid):
         LOGGER.debug("Set next request for %s, %s on on SimpleDB." % (function_name, uuid))

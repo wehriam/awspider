@@ -46,7 +46,10 @@ class AWSpiderPlugin(object):
                     instance_method[1],
                     interval=CALLABLE_FUNCTIONS[instance_id]["interval"],
                     name=CALLABLE_FUNCTIONS[instance_id]["name"])
-    
+
+    def setReservationFastCache(self, uuid, data):
+        return self.spider.setReservationFastCache(uuid, data)
+   
     def setReservationCache(self, uuid, data):
         return self.spider.setReservationCache(uuid, data)
     

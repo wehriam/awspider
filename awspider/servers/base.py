@@ -31,8 +31,10 @@ class BaseServer(object):
         "reservation_function_name", 
         "reservation_created", 
         "reservation_next_request", 
-        "reservation_error"]
+        "reservation_error",
+        "reservation_cache"]
     functions = {}
+    reservation_fast_caches = {}
     
     def __init__(self,
                  aws_access_key_id, 
@@ -189,11 +191,16 @@ class BaseServer(object):
             LOGGER.critical(message)
             raise Exception(message)
     
-    def callExposedFunction(self, func, kwargs, function_name, uuid=None):
+    def callExposedFunction(self, func, kwargs, function_name, reservation_fast_cache=None, uuid=None):
         if uuid is not None:
             self.active_jobs[uuid] = True
         if self.functions[function_name]["get_reservation_uuid"]:
             kwargs["reservation_uuid"] = uuid 
+        if self.functions[function_name]["check_reservation_fast_cache"] and \
+                reservation_fast_cache is not None:
+            kwargs["reservation_fast_cache"] = reservation_fast_cache
+        elif self.functions[function_name]["check_reservation_fast_cache"]:
+            kwargs["reservation_fast_cache"] = None
         if self.functions[function_name]["check_reservation_cache"] and \
                 self.aws_s3_reservation_cache_bucket is not None:
             d = self.getReservationCache(uuid)
@@ -201,12 +208,12 @@ class BaseServer(object):
                 func, 
                 kwargs, 
                 function_name, 
-                uuid=uuid)
+                uuid)
             d.addErrback(self._reservationCacheErrback, 
                 func, 
                 kwargs, 
                 function_name, 
-                uuid=uuid)
+                uuid)
             return d
         elif self.functions[function_name]["check_reservation_cache"]:
             kwargs["reservation_cache"] = None
@@ -249,9 +256,12 @@ class BaseServer(object):
         except:
             pass
         if uuid is None:
-            LOGGER.error("Error with %s, %s.\n%s" % (function_name, uuid, error))
-        else:
             LOGGER.error("Error with %s.\n%s" % (function_name, error))
+        else:
+            LOGGER.error("Error with %s.\nUUID:%s\n%s" % (
+                function_name, 
+                uuid,
+                error))
         return error
 
     def _callExposedFunctionCallback(self, data, function_name, uuid):
@@ -301,6 +311,7 @@ class BaseServer(object):
             kwarg_defaults = []
         required_arguments = arguments[0:len(arguments) - len(kwarg_defaults)]
         optional_arguments = arguments[len(arguments) - len(kwarg_defaults):]
+        # Reservation cache is stored on S3
         if "reservation_cache" in required_arguments:
             del required_arguments[required_arguments.index("reservation_cache")]
             check_reservation_cache = True
@@ -309,6 +320,16 @@ class BaseServer(object):
             check_reservation_cache = True
         else:
             check_reservation_cache = False
+        # Reservation fast cache is stored on SDB with the reservation
+        if "reservation_fast_cache" in required_arguments:
+            del required_arguments[required_arguments.index("reservation_fast_cache")]
+            check_reservation_fast_cache = True
+        elif "reservation_fast_cache" in optional_arguments:
+            del optional_arguments[optional_arguments.index("reservation_fast_cache")]
+            check_reservation_fast_cache = True
+        else:
+            check_reservation_fast_cache = False
+        # Indicates whether to send the reservation's UUID to the function
         if "reservation_uuid" in required_arguments:
             del required_arguments[required_arguments.index("reservation_uuid")]
             get_reservation_uuid = True
@@ -346,6 +367,7 @@ class BaseServer(object):
             "required_arguments":required_arguments,
             "optional_arguments":optional_arguments,
             "check_reservation_cache":check_reservation_cache,
+            "check_reservation_fast_cache":check_reservation_fast_cache,
             "get_reservation_uuid":get_reservation_uuid
         }
         LOGGER.info("Function %s is now callable." % function_name)
@@ -434,6 +456,13 @@ class BaseServer(object):
     
     def _getReservationCacheCallback(self, data):
         return cPickle.loads(data["response"])
+
+    def setReservationFastCache(self, uuid, data):
+        if not isinstance(data, str):
+            raise Exception("ReservationFastCache must be a string.")
+        if uuid is None:
+            return None
+        self.reservation_fast_caches[uuid] = data
     
     def setReservationCache(self, uuid, data):
         if uuid is None:

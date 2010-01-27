@@ -5,6 +5,7 @@ import dateutil.parser
 import hashlib
 import logging
 import time
+import copy
 from twisted.internet.defer import maybeDeferred
 from .requestqueuer import RequestQueuer
 from .unicodeconverter import convertToUTF8, convertToUnicode
@@ -127,9 +128,6 @@ class PageGetter:
             url = convertToUTF8(url)
         if hash_url is not None and not isinstance(hash_url, str):
             hash_url = convertToUTF8(hash_url)
-        if request_kwargs["method"] != "GET":
-            d = self.rq.getPage(url, **request_kwargs)
-            return d
         # Create request_hash to serve as a cache key from
         # either the URL or user-provided hash_url.
         if hash_url is None:
@@ -144,6 +142,10 @@ class PageGetter:
                 headers, 
                 agent, 
                 cookies])).hexdigest()
+        if request_kwargs["method"] != "GET":
+            d = self.rq.getPage(url, **request_kwargs)
+            d.addCallback(self._checkForStaleContent, content_sha1, request_hash)
+            return d
         if cache == -1:
             # Cache mode -1. Bypass cache entirely.
             LOGGER.debug("Getting request %s for URL %s." % (request_hash, url))
@@ -163,13 +165,14 @@ class PageGetter:
                 request_hash,
                 url,  
                 request_kwargs,
-                confirm_cache_write)
+                confirm_cache_write,
+                content_sha1)
             d.addErrback(self._requestWithNoCacheHeaders, 
                 request_hash, 
                 url, 
                 request_kwargs,
                 confirm_cache_write)  
-            d.addCallback(self._checkForStaleContent, content_sha1, request_hash)      
+            d.addCallback(self._checkForStaleContent, content_sha1, request_hash)    
             return d
         elif cache == 1:
             # Cache mode 1. Use cache immediately, if possible.
@@ -182,6 +185,7 @@ class PageGetter:
                 request_kwargs,
                 confirm_cache_write)    
             d.addCallback(self._checkForStaleContent, content_sha1, request_hash)    
+            d.addErrback(self._checkForStaleContentErrback)
             return d      
                   
     def _checkCacheHeaders(self, 
@@ -189,7 +193,8 @@ class PageGetter:
             request_hash, 
             url, 
             request_kwargs,
-            confirm_cache_write):
+            confirm_cache_write,
+            content_sha1):
         LOGGER.debug("Got S3 Head object request %s for URL %s." % (request_hash, url))
         http_history = {}
         #if "content-length" in data["headers"] and int(data["headers"]["content-length"][0]) == 0:
@@ -203,34 +208,35 @@ class PageGetter:
             http_history["content-changes"] = data["headers"]["content-changes"][0].split(",")
         # If cached data is not stale, return it.
         if "cache-expires" in data["headers"]:
-            try:
-                expires = dateutil.parser.parse(data["headers"]["cache-expires"][0])
-                now = datetime.datetime.now(UTC)
-                if expires > now:
-                    LOGGER.debug("Cached data %s for URL %s is not stale. Getting from S3." % (request_hash, url))
-                    d = self.s3.getObject(self.aws_s3_http_cache_bucket, request_hash)
-                    d.addCallback(self._returnCachedData, request_hash)
-                    d.addErrback(
-                        self._requestWithNoCacheHeaders, 
-                        request_hash, 
-                        url,
-                        request_kwargs, 
-                        confirm_cache_write,
-                        http_history=http_history)
-                    return d
-            except Exception, e:
-                LOGGER.error(str(e))
+            expires = dateutil.parser.parse(data["headers"]["cache-expires"][0])
+            now = datetime.datetime.now(UTC)
+            if expires > now:
+                if "content-sha1" in http_history and http_history["content-sha1"] == content_sha1:
+                    LOGGER.debug("Returning StaleContentException on %s" % request_hash)
+                    raise StaleContentException()
+                LOGGER.debug("Cached data %s for URL %s is not stale. Getting from S3." % (request_hash, url))
+                d = self.s3.getObject(self.aws_s3_http_cache_bucket, request_hash)
+                d.addCallback(self._returnCachedData, request_hash)
+                d.addErrback(
+                    self._requestWithNoCacheHeaders, 
+                    request_hash, 
+                    url,
+                    request_kwargs, 
+                    confirm_cache_write,
+                    http_history=http_history)
+                return d
+        modified_request_kwargs = copy.deepcopy(request_kwargs)
         # At this point, cached data may or may not be stale.
         # If cached data has an etag header, include it in the request.
         if "cache-etag" in data["headers"]:
-            request_kwargs["etag"] = data["headers"]["cache-etag"][0]
+            modified_request_kwargs["etag"] = data["headers"]["cache-etag"][0]
         # If cached data has a last-modified header, include it in the request.
         if "cache-last-modified" in data["headers"]:
-            request_kwargs["last_modified"] = data["headers"]["cache-last-modified"][0]
+            modified_request_kwargs["last_modified"] = data["headers"]["cache-last-modified"][0]
         LOGGER.debug("Requesting %s for URL %s with etag and last-modified headers." % (request_hash, url))
         # Make the request. A callback means a 20x response. An errback 
         # could be a 30x response, indicating the cache is not stale.
-        d = self.rq.getPage(url, **request_kwargs)
+        d = self.rq.getPage(url, **modified_request_kwargs)
         d.addCallback(
             self._returnFreshData, 
             request_hash,
@@ -244,7 +250,8 @@ class PageGetter:
             request_kwargs, 
             confirm_cache_write,
             data,
-            http_history=http_history)
+            http_history,
+            content_sha1)
         return d
         
     def _returnFreshData(self, 
@@ -260,7 +267,7 @@ class PageGetter:
             request_hash,  
             confirm_cache_write,
             http_history=http_history)
-        d.addErrback(self._storeDataErrback, data)
+        d.addErrback(self._storeDataErrback, data, request_hash)
         return d
 
     def _requestWithNoCacheHeaders(self, 
@@ -270,8 +277,12 @@ class PageGetter:
             request_kwargs, 
             confirm_cache_write,
             http_history=None):
-        if isinstance(error, ReportedFailure):
-            return error
+        try:
+            error.raiseException()
+        except StaleContentException, e:
+            raise StaleContentException()
+        except Exception, e:
+            pass
         # No header stored in the cache. Make the request.
         LOGGER.debug("Unable to find header for request %s on S3, fetching from %s." % (request_hash, url))
         d = self.rq.getPage(url, **request_kwargs)
@@ -286,7 +297,8 @@ class PageGetter:
             request_hash, 
             url, 
             confirm_cache_write,
-            http_history=http_history)
+            http_history,
+            request_kwargs)
         return d        
     
     def _requestWithNoCacheHeadersErrback(self, 
@@ -294,9 +306,13 @@ class PageGetter:
             request_hash, 
             url, 
             confirm_cache_write,
-            http_history=None):
+            http_history,
+            request_kwargs):
         LOGGER.error(error.value.__dict__)
-        LOGGER.error("Unable to get request %s for URL %s.\n%s" % (request_hash, url, error))
+        LOGGER.error("Unable to get request %s for URL %s.\n%s" % (
+            request_hash, 
+            url, 
+            error))
         if http_history is None:
             http_history = {} 
         if "request-failures" not in http_history:
@@ -328,8 +344,12 @@ class PageGetter:
             request_kwargs,  
             confirm_cache_write,
             data,
-            http_history=None):
+            http_history,
+            content_sha1):
         if error.value.status == "304":
+            if "content-sha1" in http_history and http_history["content-sha1"] == content_sha1:
+                LOGGER.debug("Raising StaleContentException on %s" % request_hash)
+                raise StaleContentException()
             LOGGER.debug("Request %s for URL %s hasn't been modified since it was last downloaded. Getting data from S3." % (request_hash, url))
             d = self.s3.getObject(self.aws_s3_http_cache_bucket, request_hash)
             d.addCallback(self._returnCachedData, request_hash)
@@ -349,7 +369,7 @@ class PageGetter:
             else:
                 http_history["request-failures"].append(str(int(self.time_offset + time.time())))
             http_history["request-failures"] = http_history["request-failures"][-3:]
-            LOGGER.debug("Writing data for failed request %s to S3." % request_hash)
+            LOGGER.debug("Writing data for failed request %s to S3. %s" % (request_hash, error))
             headers = {}
             for key in data["headers"]:
                 headers[key] = data["headers"][key][0]
@@ -376,6 +396,8 @@ class PageGetter:
         if "content-sha1" in data["headers"]:
             data["content-sha1"] = data["headers"]["content-sha1"][0]
             del data["headers"]["content-sha1"]
+        else:
+            data["content-sha1"] = hashlib.sha1(data["response"]).hexdigest()
         if "cache-expires" in data["headers"]:
             data["headers"]["expires"] = data["headers"]["cache-expires"]
             del data["headers"]["cache-expires"]
@@ -393,7 +415,7 @@ class PageGetter:
             confirm_cache_write,
             http_history=None):
         if len(data["response"]) == 0:
-            return self._storeDataErrback(Failure(exc_value=Exception("Response data is of length 0")), response_data)
+            return self._storeDataErrback(Failure(exc_value=Exception("Response data is of length 0")), response_data, request_hash)
         data["content-sha1"] = hashlib.sha1(data["response"]).hexdigest()
         if http_history is None:
             http_history = {} 
@@ -428,19 +450,24 @@ class PageGetter:
             headers=headers)
         if confirm_cache_write:
             d.addCallback(self._storeDataCallback, data)
-            d.addErrback(self._storeDataErrback, data)
+            d.addErrback(self._storeDataErrback, data, request_hash)
             return d
         return data
         
     def _storeDataCallback(self, data, response_data):
         return response_data
     
-    def _storeDataErrback(self, error, response_data):
+    def _storeDataErrback(self, error, response_data, request_hash):
+        LOGGER.error("Error storing data for %s" % (request_hash))
         return response_data
 
     def _checkForStaleContent(self, data, content_sha1, request_hash):
+        if "content-sha1" not in data:
+            data["content-sha1"] = hashlib.sha1(data["response"]).hexdigest()
         if content_sha1 == data["content-sha1"]:
-            LOGGER.debug("Raising stale content exception on %s" % (request_hash))
+            LOGGER.debug("Raising StaleContentException on %s" % request_hash)
             raise StaleContentException(content_sha1)
         else:
             return data
+            
+

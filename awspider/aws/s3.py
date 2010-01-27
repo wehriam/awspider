@@ -245,13 +245,17 @@ class AmazonS3:
         """
         Prepend custom header prefix to header dictionary keys.
         """
+        headers = dict([(x[0].lower(), x[1]) for x in headers.items()])
+        for header in self.reserved_headers:
+            if header in headers:
+                del headers[header]
         keys = headers.keys()
         values = headers.values()
-        for key in keys:
-            if key.lower() in self.reserved_headers:
-                message = "Header %s is reserved for use by Amazon S3." % key
-                LOGGER.critical(message)
-                raise Exception(message)
+        #for key in keys:
+        #    if key.lower() in self.reserved_headers:
+        #        message = "Header %s is reserved for use by Amazon S3." % key
+        #        LOGGER.error(message)
+        #        raise Exception(message)
         meta = "x-amz-meta-"
         return dict(zip(["%s%s" % (meta, x) for x in keys], values))
        
