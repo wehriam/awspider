@@ -157,7 +157,7 @@ class InterfaceServer(BaseServer):
             else:
                 LOGGER.debug("Calling %s immediately with arguments:\n%s" % (function_name, PRETTYPRINTER.pformat(filtered_kwargs)))
                 self.active_jobs[uuid] = True
-                b = self.callExposedFunction(function["function"], filtered_kwargs, function_name, uuid)
+                b = self.callExposedFunction(function["function"], filtered_kwargs, function_name, uuid=uuid)
                 d = DeferredList([a,b], consumeErrors=True)
             d.addCallback(self._createReservationCallback2, function_name, uuid)
             d.addErrback(self._createReservationErrback2, function_name, uuid)
@@ -249,7 +249,7 @@ class InterfaceServer(BaseServer):
                 has_reqiured_arguments = False
                 raise Exception("%s, %s does not have required argument %s." % (function_name, uuid, key))
         LOGGER.debug("Executing function.\n%s" % function_name)
-        return self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid)
+        return self.callExposedFunction(exposed_function["function"], kwargs, function_name, uuid=uuid)
         
     def _executeReservationErrback(self, error):
         LOGGER.error("Unable to query SimpleDB.\n%s" % error)
