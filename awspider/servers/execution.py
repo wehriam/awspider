@@ -382,13 +382,10 @@ class ExecutionServer(BaseServer):
 
     def query(self, data=None):
         if len(self.job_queue) > 100:
-            LOGGER.info("%s jobs in queue. Not querying." % len(self.job_queue))
             return
         if self.querying_for_jobs:
-            LOGGER.info("Already querying.")
             return
         self.querying_for_jobs = True
-        LOGGER.info("%s jobs in queue. Querying." % len(self.job_queue))
         if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
             uuid_limit_clause = "AND itemName() < '%s'" % self.uuid_limits["end"]
         elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
