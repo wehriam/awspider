@@ -51,7 +51,7 @@ class ExecutionServer(BaseServer):
             name=None,
             time_offset=None,
             peer_check_interval=60,
-            reservation_check_interval=1,
+            reservation_check_interval=20,
             hammer_prevention=False):
         if name == None:
             name = "AWSpider Execution Server UUID: %s" % self.uuid
