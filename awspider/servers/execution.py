@@ -31,6 +31,7 @@ class ExecutionServer(BaseServer):
     job_count = 0
     query_start_time = None
     simultaneous_jobs = 50
+    querying_for_jobs = False
     
     def __init__(self,
             aws_access_key_id, 
@@ -50,7 +51,7 @@ class ExecutionServer(BaseServer):
             name=None,
             time_offset=None,
             peer_check_interval=60,
-            reservation_check_interval=60,
+            reservation_check_interval=1,
             hammer_prevention=False):
         if name == None:
             name = "AWSpider Execution Server UUID: %s" % self.uuid
@@ -380,6 +381,14 @@ class ExecutionServer(BaseServer):
         return d
 
     def query(self, data=None):
+        if len(self.job_queue) > 100:
+            LOGGER.info("%s jobs in queue. Not querying." % len(self.job_queue))
+            return
+        if self.querying_for_jobs:
+            LOGGER.info("Already querying.")
+            return
+        self.querying_for_jobs = True
+        LOGGER.info("%s jobs in queue. Querying." % len(self.job_queue))
         if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
             uuid_limit_clause = "AND itemName() < '%s'" % self.uuid_limits["end"]
         elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
@@ -402,6 +411,7 @@ class ExecutionServer(BaseServer):
         d.addErrback(self._queryErrback)
 
     def _queryErrback(self, error):
+        self.querying_for_jobs = False
         LOGGER.error("Unable to query SimpleDB.\n%s" % error)
 
     def _queryCallback(self, data):
@@ -424,13 +434,16 @@ class ExecutionServer(BaseServer):
                 d.addCallback(self._queryCallback2)
                 d.addErrback(self._queryErrback) 
                 deferreds.append(d)
-            d = DeferredList(deferreds)
+            d = DeferredList(deferreds, consumeErrors=True)
             d.addCallback(self._queryCallback3)
+            d.addErrback(self._queryErrback)
             
     def _queryCallback3(self, data):
-        self.job_count = 0
-        self.query_start_time = time.time()
-                            
+        self.querying_for_jobs = False
+        if self.query_start_time is None:
+            self.job_count = 0
+            self.query_start_time = time.time()
+        
     def _queryCallback2(self, data):
         # Iterate through the reservation data returned from SimpleDB
         for uuid in data:
