@@ -12,7 +12,7 @@ from ..requestqueuer import RequestQueuer
 from .lib import etree_to_dict, safe_quote_tuple
 
 
-logger = logging.getLogger("main")
+LOGGER = logging.getLogger("main")
 
 
 SDB_NAMESPACE = "{http://sdb.amazonaws.com/doc/2009-04-15/}"
@@ -181,6 +181,7 @@ class AmazonSDB:
                       source_domain=source_domain,
                       destination_domain=destination_domain,
                       total_box_usage=total_box_usage)
+        d.addErrback(self._genericErrback)
         return d
 
     def _copyDomainCallback3(self, data, source_domain, destination_domain,
@@ -229,7 +230,7 @@ class AmazonSDB:
                 destination_domain=destination_domain,
                 next_token=next_token,
                 total_box_usage=total_box_usage)
-        logger.debug("""CopyDomain:\n%s -> %s\nBox usage: %s""" % (
+        LOGGER.debug("""CopyDomain:\n%s -> %s\nBox usage: %s""" % (
             source_domain,
             destination_domain,
             total_box_usage))
@@ -251,14 +252,15 @@ class AmazonSDB:
          * *domain* -- Domain name
         """   
         d = self.domainMetadata(domain)
-        d.addErrback(self._checkAndCreateDomainErrback, domain)     
+        d.addErrback(self._checkAndCreateDomainErrback, domain)  
         return d
 
     def _checkAndCreateDomainErrback(self, error, domain):
-        if int(error.value.status) == 400:  
-            d = self.createDomain(domain)
-            d.addErrback(self._checkAndCreateDomainErrback2, domain)
-            return d
+        if hasattr(error, "value") and hasattr(error.value, "status"):
+            if int(error.value.status) == 400:  
+                d = self.createDomain(domain)
+                d.addErrback(self._checkAndCreateDomainErrback2, domain)
+                return d
         message = "Could not find or create domain '%s'." % domain
         raise Exception(message)
 
@@ -279,13 +281,14 @@ class AmazonSDB:
         }
         d = self._request(parameters)
         d.addCallback(self._createDomainCallback, domain)
+        d.addErrback(self._genericErrback)   
         return d
 
     def _createDomainCallback(self, data, domain):
         xml = ET.fromstring(data["response"])
         box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
         self.box_usage += box_usage
-        logger.debug("Created SimpleDB domain '%s'. Box usage: %s" % (domain,
+        LOGGER.debug("Created SimpleDB domain '%s'. Box usage: %s" % (domain,
             box_usage))
         return True
    
@@ -301,13 +304,14 @@ class AmazonSDB:
         parameters["DomainName"] = domain
         d = self._request(parameters)
         d.addCallback(self._deleteDomainCallback, domain)
+        d.addErrback(self._genericErrback)
         return d
 
     def _deleteDomainCallback(self, data, domain):
         xml = ET.fromstring(data["response"])
         box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
         self.box_usage += box_usage
-        logger.debug("Deleted SimpleDB domain '%s'. Box usage: %s" % (domain, 
+        LOGGER.debug("Deleted SimpleDB domain '%s'. Box usage: %s" % (domain, 
             box_usage))
         return True   
 
@@ -329,6 +333,7 @@ class AmazonSDB:
         d.addCallback(self._listDomainsCallback, 
                       previous_results=previous_results,
                       total_box_usage=total_box_usage)
+        d.addErrback(self._genericErrback)   
         return d
 
     def _listDomainsCallback(self, 
@@ -351,7 +356,7 @@ class AmazonSDB:
             return self._listDomains(next_token=next_token,
                                      previous_results=results,
                                      total_box_usage=total_box_usage)
-        logger.debug("Listed domains. Box usage: %s" % total_box_usage)
+        LOGGER.debug("Listed domains. Box usage: %s" % total_box_usage)
         return results
 
     def domainMetadata(self, domain):
@@ -366,18 +371,90 @@ class AmazonSDB:
         parameters["DomainName"] = domain
         d = self._request(parameters)
         d.addCallback(self._domainMetadataCallback, domain)
+        d.addErrback(self._genericErrback)   
         return d
        
     def _domainMetadataCallback(self, data, domain):
         xml = ET.fromstring(data["response"])
         box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
         self.box_usage += box_usage
-        logger.debug("Got SimpleDB domain '%s' metadata. Box usage: %s" % (
+        LOGGER.debug("Got SimpleDB domain '%s' metadata. Box usage: %s" % (
             domain,
             box_usage))
         xml_response = etree_to_dict(xml, namespace=SDB_NAMESPACE)
         return xml_response["DomainMetadataResult"][0]
    
+    def batchPutAttributes(self, domain, attributes_by_item_name, 
+            replace_by_item_name=None):
+        """
+        Batch put attributes into domain.
+       
+        **Arguments:**
+         * *domain* -- Domain name
+         * *attributes_by_item_name* -- Dictionary of dictionaries. First 
+           level keys are the item name, value is dictionary of key/value 
+           pairs. Example: ``{"item_name":{"attribute_name":"value"}}``
+         
+         **Keyword arguments:**
+         * *replace_by_item_name* -- Dictionary of lists. First level keys
+           are the item names, value is a list of of attributes that should
+           be overwritten. ``{"item_name":["attribute_name"]}`` (Default 
+           empty dictionary)
+        """   
+        if replace_by_item_name is None:
+            replace_by_item_name = {}
+        if len(attributes_by_item_name) > 25:
+            raise Exception("Too many items in batchPutAttributes. Up to 25 items per call allowed.")
+        for item_name in replace_by_item_name:            
+            if not isinstance(replace_by_item_name[item_name], list):
+                raise Exception("Replace argument '%s' must be a list." % item_name)
+        for item_name in attributes_by_item_name:
+            if not isinstance(attributes_by_item_name[item_name], dict):
+                raise Exception("Attributes argument '%s' must be a dictionary." % item_name)
+        parameters = {}
+        parameters["Action"] = "BatchPutAttributes"
+        parameters["DomainName"] = domain
+        i = 0
+        for item_name in attributes_by_item_name:
+            parameters["Item.%s.ItemName" % i] = item_name
+            attributes_list = []
+            for attribute in attributes_by_item_name[item_name].items():
+                # If the attribute is a list, split into multiple attributes.
+                if isinstance(attribute[1], list):
+                    for value in attribute[1]:
+                        attributes_list.append((attribute[0], value))
+                else:
+                    attributes_list.append(attribute)
+            j = 0
+            for attribute in attributes_list:
+                parameters["Item.%s.Attribute.%s.Name" % (i,j)] = attribute[0]
+                parameters["Item.%s.Attribute.%s.Value" % (i,j)] = attribute[1]
+                if item_name in replace_by_item_name:
+                    if attribute[0] in replace_by_item_name[item_name]:
+                        parameters["Item.%s.Attribute.%s.Replace" % (i,j)] = "true"
+                j += 1
+            i += 1
+        d = self._request(parameters)
+        d.addCallback(
+            self._batchPutAttributesCallback, 
+            domain, 
+            attributes_by_item_name)
+        d.addErrback(self._genericErrback)
+        return d
+    
+    def _batchPutAttributesCallback(self, 
+            data, 
+            domain, 
+            attributes_by_item_name):
+        xml = ET.fromstring(data["response"])
+        box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
+        self.box_usage += box_usage
+        LOGGER.debug("""Batch put attributes %s in SimpleDB domain '%s'. Box usage: %s""" % (
+            attributes_by_item_name,
+            domain,
+            box_usage))
+        return True
+        
     def putAttributes(self, domain, item_name, attributes, replace=None):
         """
         Put attributes into domain at item_name.
@@ -418,13 +495,14 @@ class AmazonSDB:
             i += 1
         d = self._request(parameters)
         d.addCallback(self._putAttributesCallback, domain, item_name, attributes)
+        d.addErrback(self._genericErrback)
         return d
        
     def _putAttributesCallback(self, data, domain, item_name, attributes):
         xml = ET.fromstring(data["response"])
         box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
         self.box_usage += box_usage
-        logger.debug("""Put attributes %s on '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
+        LOGGER.debug("""Put attributes %s on '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
             attributes,
             item_name,
             domain,
@@ -450,13 +528,14 @@ class AmazonSDB:
             parameters["AttributeName"] = attribute_name
         d = self._request(parameters)
         d.addCallback(self._getAttributesCallback, domain, item_name)
+        d.addErrback(self._genericErrback)
         return d
        
     def _getAttributesCallback(self, data, domain, item_name):
         xml = ET.fromstring(data["response"])
         box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
         self.box_usage += box_usage
-        logger.debug("""Got attributes from '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
+        LOGGER.debug("""Got attributes from '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
             item_name,
             domain,
             box_usage))
@@ -515,13 +594,14 @@ class AmazonSDB:
                 attr_count += 1
         d = self._request(parameters)
         d.addCallback(self._deleteAttributesCallback, domain, item_name)
+        d.addErrback(self._genericErrback)   
         return d
 
     def _deleteAttributesCallback(self, data, domain, item_name):
         xml = ET.fromstring(data["response"])
         box_usage = float(xml.find(".//%sBoxUsage" % SDB_NAMESPACE).text)
         self.box_usage += box_usage
-        logger.debug("""Deleted attributes from '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
+        LOGGER.debug("""Deleted attributes from '%s' in SimpleDB domain '%s'. Box usage: %s""" % (
             item_name,
             domain,
             box_usage))
@@ -551,6 +631,7 @@ class AmazonSDB:
                       select_expression=select_expression,
                       previous_count=previous_count,
                       total_box_usage=total_box_usage)
+        d.addErrback(self._genericErrback)   
         return d
 
     def _selectCountCallback(self, data, select_expression=None, 
@@ -570,7 +651,7 @@ class AmazonSDB:
             return self._selectCount(select_expression, next_token=next_token,
                 previous_count=count,
                 total_box_usage=total_box_usage)
-        logger.debug("""Select:\n'%s'\nBox usage: %s""" % (
+        LOGGER.debug("""Select:\n'%s'\nBox usage: %s""" % (
             select_expression,
             total_box_usage))
         return count
@@ -588,6 +669,7 @@ class AmazonSDB:
                       select_expression=select_expression,
                       previous_results=previous_results,
                       total_box_usage=total_box_usage)
+        d.addErrback(self._genericErrback)   
         return d
 
     def _selectCallback(self, data, select_expression=None, 
@@ -623,7 +705,7 @@ class AmazonSDB:
             return self._select(select_expression, next_token=next_token,
                                 previous_results=results,
                                 total_box_usage=total_box_usage)
-        logger.debug("""Select:\n'%s'\nBox usage: %s""" % (
+        LOGGER.debug("""Select:\n'%s'\nBox usage: %s""" % (
             select_expression,
             total_box_usage))
         return results       
@@ -636,10 +718,18 @@ class AmazonSDB:
          * *parameters* -- Key value pairs of parameters
         """
         parameters = self._getAuthorization("GET", parameters)
-        query_string = urllib.urlencode(parameters)
+        query_string = urllib.urlencode(parameters)       
         url = "https://%s/?%s" % (self.host, query_string)
-        d = self.rq.getPage(url, method="GET")
-        return d
+        if len(url) > 4096:
+            del parameters['Signature']
+            parameters = self._getAuthorization("POST", parameters)
+            query_string = urllib.urlencode(parameters)       
+            url = "https://%s" % (self.host)
+            d = self.rq.getPage(url, method="POST", postdata=query_string)
+            return d
+        else:
+            d = self.rq.getPage(url, method="GET")
+            return d
          
     def _canonicalize(self, parameters):
         """
@@ -686,3 +776,14 @@ class AmazonSDB:
         signature = base64.encodestring(hmac.new(*args).digest()).strip()
         signature_parameters.update({'Signature': signature})
         return signature_parameters
+
+    def _genericErrback(self, error):
+        if hasattr(error, "value"):
+            if hasattr(error.value, "response"):
+                xml = ET.XML(error.value.response)
+                try:
+                    LOGGER.debug(xml.find(".//Message").text)
+                except Exception, e:
+                    pass
+        return error
+        

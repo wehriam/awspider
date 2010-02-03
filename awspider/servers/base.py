@@ -9,11 +9,14 @@ from uuid import uuid4
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 from ..aws import AmazonS3, AmazonSDB
+from ..aws import sdb_now
 from ..exceptions import DeleteReservationException
 from ..pagegetter import PageGetter
 from ..requestqueuer import RequestQueuer
 from ..timeoffset import getTimeOffset
+import pprint
 
+PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
 LOGGER = logging.getLogger("main")
 

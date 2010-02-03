@@ -2,8 +2,9 @@ import hashlib
 import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "lib"))
-
-
+from uuid import uuid4
+import time
+from twisted.internet.task import deferLater
 from twisted.trial import unittest
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred, DeferredList
@@ -53,7 +54,75 @@ class AmazonSDBTestCase(unittest.TestCase):
     def test_04_PutAttributes(self):
         d = self.sdb.putAttributes(self.uuid, "test", {"a":[1,3], "b":2})
         return d
+    
+    def test_04a_BatchPutAttributes(self):
+        attributes_by_item_name = {
+            "test_a":{"a":1},
+            "test_b":{"b":2},
+            "test_c":{"c":[3,4], "d":5}}
+        d = self.sdb.batchPutAttributes(self.uuid, attributes_by_item_name)
+        d.addCallback(self._batchPutAttributesCallback)
+        return d
 
+    def _batchPutAttributesCallback(self, data):
+        d = deferLater(reactor, 10, self._batchPutAttributesCallback2)
+        return d
+    
+    def _batchPutAttributesCallback2(self):
+        deferreds = []
+        deferreds.append(self.sdb.getAttributes(self.uuid, "test_a"))
+        deferreds.append(self.sdb.getAttributes(self.uuid, "test_b"))
+        deferreds.append(self.sdb.getAttributes(self.uuid, "test_c"))
+        d = DeferredList(deferreds, consumeErrors=True)
+        d.addCallback(self._batchPutAttributesCallback3)
+        return d
+    
+    def _batchPutAttributesCallback3(self, data):
+        for row in data:
+            if row[0] == False:
+                raise row[1]
+        if "a" not in data[0][1]:
+            raise Exception("GetAttributes 1 (a) failed on BatchPutAttributes")
+        if "1" not in data[0][1]["a"]:
+            raise Exception("GetAttributes 1 (b) failed on BatchPutAttributes")
+        if "b" not in data[1][1]:
+            raise Exception("GetAttributes 2 (a) failed on BatchPutAttributes")
+        if "2" not in data[1][1]["b"]:
+            raise Exception("GetAttributes 2 (b) failed on BatchPutAttributes") 
+        if "c" not in data[2][1]:
+            raise Exception("GetAttributes 3 (a) failed on BatchPutAttributes")
+        if "4" not in data[2][1]["c"] or "4" not in data[2][1]["c"]:
+            raise Exception("GetAttributes 3 (b) failed on BatchPutAttributes")   
+        if "5" not in data[2][1]["d"]:
+            raise Exception("GetAttributes 3 (c) failed on BatchPutAttributes") 
+            
+    def test_04b_BatchPutAttributesMass(self): 
+        attributes_by_item_name = {} 
+        for i in range(1,25):
+            attributes = {}
+            for j in range(0,10):
+                attributes[uuid4().hex] = uuid4().hex
+            attributes_by_item_name[uuid4().hex] = attributes
+        attributes_by_item_name["test_d"] = {"e":1} 
+        d = self.sdb.batchPutAttributes(self.uuid, attributes_by_item_name)
+        d.addCallback(self._batchPutAttributesMassCallback)
+        return d
+    
+    def _batchPutAttributesMassCallback(self, data):
+        d = deferLater(reactor, 10, self._batchPutAttributesMassCallback2)
+        return d
+        
+    def _batchPutAttributesMassCallback2(self):
+        d = self.sdb.getAttributes(self.uuid, "test_d")
+        d.addCallback(self._batchPutAttributesMassCallback3)
+        return d
+    
+    def _batchPutAttributesMassCallback3(self, data):
+        if "e" not in data:
+            raise Exception("GetAttributes failed on BatchPutAttributesMass")   
+        if "1" not in data["e"]:
+            raise Exception("GetAttributes failed on BatchPutAttributesMass")   
+                                 
     def test_05_GetAttributes(self):
         d = self.sdb.getAttributes(self.uuid, "test")
         return d  
