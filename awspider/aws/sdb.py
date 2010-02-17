@@ -607,7 +607,7 @@ class AmazonSDB:
             box_usage))
         return True
    
-    def select(self, select_expression):
+    def select(self, select_expression, max_results=0):
         """
         Run a select query
        
@@ -616,7 +616,7 @@ class AmazonSDB:
         """  
         if "count(" in select_expression.lower():
             return self._selectCount(select_expression)
-        return self._select(select_expression)
+        return self._select(select_expression, max_results=max_results)
       
     def _selectCount(self, select_expression, next_token=None, 
             previous_count=0,
@@ -658,7 +658,8 @@ class AmazonSDB:
         
     def _select(self, select_expression, next_token=None, 
             previous_results=None,
-            total_box_usage=0):
+            total_box_usage=0,
+            max_results=0):
         parameters = {}
         parameters["Action"] = "Select"
         parameters["SelectExpression"] = select_expression
@@ -668,13 +669,15 @@ class AmazonSDB:
         d.addCallback(self._selectCallback, 
                       select_expression=select_expression,
                       previous_results=previous_results,
-                      total_box_usage=total_box_usage)
+                      total_box_usage=total_box_usage,
+                      max_results=max_results)
         d.addErrback(self._genericErrback)   
         return d
 
     def _selectCallback(self, data, select_expression=None, 
             previous_results=None,
-            total_box_usage=0):
+            total_box_usage=0,
+            max_results=0):
         if previous_results is not None:
             results = previous_results
         else:
@@ -702,9 +705,13 @@ class AmazonSDB:
                     attribute_dict[attr_name] = [attr_value]
             results[key] = attribute_dict
         if next_token is not None:
-            return self._select(select_expression, next_token=next_token,
-                                previous_results=results,
-                                total_box_usage=total_box_usage)
+            if max_results == 0 or len(results) < max_results:
+                return self._select(select_expression, next_token=next_token,
+                                    previous_results=results,
+                                    total_box_usage=total_box_usage,
+                                    max_results=max_results)
+        if max_results > 0:
+            results = dict(results.items()[:max_results])
         LOGGER.debug("""Select:\n'%s'\nBox usage: %s""" % (
             select_expression,
             total_box_usage))

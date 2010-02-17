@@ -33,6 +33,7 @@ class ExecutionServer(BaseServer):
     simultaneous_jobs = 50
     querying_for_jobs = False
     reservation_update_queue = []
+    current_sql = ""
     
     def __init__(self,
             aws_access_key_id, 
@@ -221,8 +222,8 @@ class ExecutionServer(BaseServer):
             "active_requests":server_data["active_requests"],
             "pending_requests":server_data["pending_requests"],
             "current_timestamp":server_data["current_timestamp"],
-            "job_queue":len(self.job_queue)
-        }
+            "job_queue":len(self.job_queue),
+            "current_sql":self.current_sql.replace("\n", "")}
         if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
             attributes["range"] = "Start - %s" % self.uuid_limits["end"]
         elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
@@ -323,11 +324,28 @@ class ExecutionServer(BaseServer):
             self.uuid_limits = splits[self.peer_uuids.index(self.uuid)]
         else:
             self.uuid_limits = {"start":None, "end":None}
+        job_queue_length = len(self.job_queue)
+        if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
+            self.job_queue = filter(self.testJobByEnd, self.job_queue)
+        elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
+            self.job_queue = filter(self.testJobByStart, self.job_queue)
+        elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is not None:
+            self.job_queue = filter(self.testJobByStartAndEnd, self.job_queue)
+        LOGGER.critical("Abandoned %s jobs that were out of range." % (job_queue_length - len(self.job_queue)))
         LOGGER.debug("Updated UUID limits to: %s" % self.uuid_limits)
-        
+    
     def _coordinateErrback(self, error):
         LOGGER.error("Could not query SimpleDB for peers: %s" % str(error))
 
+    def testJobByEnd(self, job):
+        return job["uuid"] < self.uuid_limits["end"]
+
+    def testJobByStart(self, job):
+        return job["uuid"] > self.uuid_limits["start"]
+
+    def testJobByStartAndEnd(self, job):
+        return (job["uuid"] < self.uuid_limits["end"] and job["uuid"] > self.uuid_limits["start"])
+        
     def verifyPeer(self, uuid, peer):
         LOGGER.debug("Verifying peer %s" % uuid)
         deferreds = []
@@ -443,8 +461,9 @@ class ExecutionServer(BaseServer):
                 self.aws_sdb_reservation_domain, 
                 sdb_now(offset=self.time_offset),
                 uuid_limit_clause)
+        self.current_sql = sql
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
-        d = self.sdb.select(sql)
+        d = self.sdb.select(sql, max_results=self.reservation_check_interval * 20)
         d.addCallback(self._queryCallback)
         d.addErrback(self._queryErrback)
 
@@ -459,6 +478,8 @@ class ExecutionServer(BaseServer):
         for uuid in data:
             if uuid in self.active_jobs or uuid in self.queued_jobs:
                 continue
+            if len(self.job_queue) > self.reservation_check_interval * 20:
+                break
             kwargs_raw = {}
             reserved_arguments = {}
             # Load attributes into dicts for use by the system or custom functions.
@@ -531,7 +552,6 @@ class ExecutionServer(BaseServer):
             LOGGER.critical("No average speed to report yet.")
             
     def executeJobs(self, data=None):
-        deferreds = []
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
             job = self.job_queue.pop(0)
             exposed_function = job["exposed_function"]
@@ -542,18 +562,31 @@ class ExecutionServer(BaseServer):
             # Call the function.
             LOGGER.debug("Calling %s with args %s" % (function_name, kwargs))
             # Schedule the next request.
-            d = self.callExposedFunction(
-                exposed_function["function"], 
+            self._callExposedFunction(
+                exposed_function["function"],
+                exposed_function["interval"], 
                 kwargs, 
                 function_name, 
                 uuid=uuid,
                 reservation_fast_cache=job["reservation_cache"])
-            d.addCallback(self._jobCountCallback)
-            d.addErrback(self._jobCountErrback)
-            d.addCallback(self._setNextRequest, uuid, exposed_function["interval"], function_name)
-            deferreds.append(d)
-        d = DeferredList(deferreds, consumeErrors=True)
-        d.addCallback(self._sendReservationUpdateQueue)
+
+    def _callExposedFunction(
+        self, 
+        func, 
+        interval,
+        kwargs, 
+        function_name, 
+        uuid=None, 
+        reservation_fast_cache=None):
+        d = self.callExposedFunction(
+            func, 
+            kwargs, 
+            function_name, 
+            uuid=uuid,
+            reservation_fast_cache=reservation_fast_cache)
+        d.addCallback(self._jobCountCallback)
+        d.addErrback(self._jobCountErrback)
+        d.addCallback(self._setNextRequest, uuid, interval, function_name)
         
     def _jobCountCallback(self, data):
         self.job_count += 1
@@ -573,6 +606,8 @@ class ExecutionServer(BaseServer):
         self.reservation_update_queue.append((
             uuid,
             reservation_next_request_parameters))
+        if len(self.reservation_update_queue) > 25:
+            self._sendReservationUpdateQueue()
     
     def _sendReservationUpdateQueue(self, data=None):
         if len(self.reservation_update_queue) < 25 and (len(self.active_jobs) > 0 or len(self.job_queue) > 0):

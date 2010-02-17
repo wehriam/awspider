@@ -73,7 +73,7 @@ class AdminServer(BaseServer):
         if self.shutdown_trigger_id is not None:
             if self.aws_sdb_coordination_domain is not None:
                 self.peercheckloop = task.LoopingCall(self.peerCheck)
-                self.peercheckloop.start(self.peer_check_interval/4)
+                self.peercheckloop.start(self.peer_check_interval)
         
     def shutdown(self):
         deferreds = []
@@ -104,8 +104,10 @@ class AdminServer(BaseServer):
     
     def _peerCheckCallback(self, data):
         LOGGER.info("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
+        ip_addresses = [x['public_ip'][0] for x in data.values()]
+        LOGGER.info("%s machines responding. %s" % (len(data), ip_addresses))
         
-    def _peerCheckErrback(self, data):
+    def _peerCheckErrback(self, error):
         LOGGER.error("Could not query SimpleDB for peers: %s" % str(error))
     
     def clearHTTPCache(self):
