@@ -190,7 +190,6 @@ class PageGetter:
                 request_kwargs,
                 confirm_cache_write)    
             d.addCallback(self._checkForStaleContent, content_sha1, request_hash)    
-            d.addErrback(self._checkForStaleContentErrback)
             return d      
                   
     def _checkCacheHeaders(self, 

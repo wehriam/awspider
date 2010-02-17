@@ -223,6 +223,14 @@ class ExecutionServer(BaseServer):
             "current_timestamp":server_data["current_timestamp"],
             "job_queue":len(self.job_queue)
         }
+        if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
+            attributes["range"] = "Start - %s" % self.uuid_limits["end"]
+        elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
+            attributes["range"] = "%s - End" % self.uuid_limits["start"]
+        elif self.uuid_limits["start"] is None and self.uuid_limits["end"] is None:
+            attributes["range"] = "Full range"
+        else:
+            attributes["range"] = "%s - %s" % (self.uuid_limits["start"], self.uuid_limits["end"])
         attributes.update(self.network_information)
         d = self.sdb.putAttributes(
             self.aws_sdb_coordination_domain, 
@@ -493,12 +501,12 @@ class ExecutionServer(BaseServer):
                     kwargs[key] = kwargs_raw[key]
                 if key in exposed_function["optional_arguments"]:
                     kwargs[key] = kwargs_raw[key]
-            has_reqiured_arguments = True
+            has_required_arguments = True
             for key in exposed_function["required_arguments"]:
                 if key not in kwargs:
-                    has_reqiured_arguments = False
+                    has_required_arguments = False
                     LOGGER.error("%s, %s does not have required argument %s." % (function_name, uuid, key))
-            if not has_reqiured_arguments:
+            if not has_required_arguments:
                 continue
             self.queued_jobs[uuid] = True
             job = {"exposed_function":exposed_function,

@@ -1,12 +1,16 @@
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 from twisted.web.resource import Resource
 from twisted.internet import reactor
+from twisted.internet import task
 from twisted.web import server
-from .base import BaseServer, LOGGER
+from .base import BaseServer, LOGGER, PRETTYPRINTER
 from ..resources import AdminResource
+from ..aws import sdb_now_add
+
 
 class AdminServer(BaseServer):
     
+    peercheckloop = None 
     exposed_functions = []
     exposed_function_resources = {}
     
@@ -22,11 +26,13 @@ class AdminServer(BaseServer):
             log_directory=None,
             log_level="debug",
             name=None,
-            time_offset=None,):
+            time_offset=None,
+            peer_check_interval=60):
         if name == None:
             name = "AWSpider Admin Server UUID: %s" % self.uuid
         resource = AdminResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
+        self.peer_check_interval = int(peer_check_interval)
         BaseServer.__init__(
             self,
             aws_access_key_id, 
@@ -60,7 +66,15 @@ class AdminServer(BaseServer):
                 d.addCallback(self._startHandleError, row[1])
                 return d
         d = BaseServer.start(self)
+        d.addCallback(self._startCallback2)
 
+    def _startCallback2(self, data):
+        LOGGER.debug("At callback.")
+        if self.shutdown_trigger_id is not None:
+            if self.aws_sdb_coordination_domain is not None:
+                self.peercheckloop = task.LoopingCall(self.peerCheck)
+                self.peercheckloop.start(self.peer_check_interval/4)
+        
     def shutdown(self):
         deferreds = []
         LOGGER.debug("%s stopping on main HTTP interface." % self.name)
@@ -77,6 +91,23 @@ class AdminServer(BaseServer):
     def _shutdownCallback(self, data):
         return BaseServer.shutdown(self)
 
+    def peerCheck(self):
+        sql = "SELECT * FROM `%s` WHERE created > '%s'" % (
+            self.aws_sdb_coordination_domain, 
+            sdb_now_add(self.peer_check_interval * -2, 
+            offset=self.time_offset))
+        LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
+        d = self.sdb.select(sql)
+        d.addCallback(self._peerCheckCallback)
+        d.addErrback(self._peerCheckErrback)
+        return d
+    
+    def _peerCheckCallback(self, data):
+        LOGGER.info("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
+        
+    def _peerCheckErrback(self, data):
+        LOGGER.error("Could not query SimpleDB for peers: %s" % str(error))
+    
     def clearHTTPCache(self):
         return self.s3.emptyBucket(self.aws_s3_http_cache_bucket)
 
