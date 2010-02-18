@@ -53,7 +53,7 @@ class ExecutionServer(BaseServer):
             name=None,
             time_offset=None,
             peer_check_interval=60,
-            reservation_check_interval=60,
+            reservation_check_interval=5,
             hammer_prevention=False):
         if name == None:
             name = "AWSpider Execution Server UUID: %s" % self.uuid
@@ -331,7 +331,7 @@ class ExecutionServer(BaseServer):
             self.job_queue = filter(self.testJobByStart, self.job_queue)
         elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is not None:
             self.job_queue = filter(self.testJobByStartAndEnd, self.job_queue)
-        LOGGER.critical("Abandoned %s jobs that were out of range." % (job_queue_length - len(self.job_queue)))
+        LOGGER.info("Abandoned %s jobs that were out of range." % (job_queue_length - len(self.job_queue)))
         LOGGER.debug("Updated UUID limits to: %s" % self.uuid_limits)
     
     def _coordinateErrback(self, error):
@@ -439,8 +439,10 @@ class ExecutionServer(BaseServer):
 
     def query(self, data=None):
         if len(self.job_queue) > 100:
+            LOGGER.debug("Skipping query. %s jobs already active." % len(self.job_queue))
             return
         if self.querying_for_jobs:
+            LOGGER.debug("Skipping query. Already querying for jobs.")
             return
         self.querying_for_jobs = True
         if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
@@ -463,7 +465,7 @@ class ExecutionServer(BaseServer):
                 uuid_limit_clause)
         self.current_sql = sql
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
-        d = self.sdb.select(sql, max_results=self.reservation_check_interval * 20)
+        d = self.sdb.select(sql, max_results=self.reservation_check_interval * 30)
         d.addCallback(self._queryCallback)
         d.addErrback(self._queryErrback)
 
@@ -472,14 +474,12 @@ class ExecutionServer(BaseServer):
         LOGGER.error("Unable to query SimpleDB.\n%s" % error)
         
     def _queryCallback(self, data):
-        LOGGER.critical("Fetched %s jobs." % len(data))
+        LOGGER.info("Fetched %s jobs." % len(data))
         self.querying_for_jobs = False
         # Iterate through the reservation data returned from SimpleDB
         for uuid in data:
             if uuid in self.active_jobs or uuid in self.queued_jobs:
                 continue
-            if len(self.job_queue) > self.reservation_check_interval * 20:
-                break
             kwargs_raw = {}
             reserved_arguments = {}
             # Load attributes into dicts for use by the system or custom functions.
@@ -547,11 +547,11 @@ class ExecutionServer(BaseServer):
     def reportJobSpeed(self):
         if self.query_start_time is not None and self.job_count > 0:
             seconds_per_job = (time.time() - self.query_start_time) / self.job_count
-            LOGGER.critical("Average execution time: %s, %s active." % (seconds_per_job, len(self.active_jobs)))
+            LOGGER.info("Average execution time: %s, %s active." % (seconds_per_job, len(self.active_jobs)))
         else:
-            LOGGER.critical("No average speed to report yet.")
+            LOGGER.info("No average speed to report yet.")
             
-    def executeJobs(self, data=None):
+    def executeJobs(self, data=None):           
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
             job = self.job_queue.pop(0)
             exposed_function = job["exposed_function"]
@@ -559,36 +559,18 @@ class ExecutionServer(BaseServer):
             function_name = job["function_name"]
             uuid = job["uuid"]
             del self.queued_jobs[uuid]
-            # Call the function.
             LOGGER.debug("Calling %s with args %s" % (function_name, kwargs))
-            # Schedule the next request.
-            self._callExposedFunction(
-                exposed_function["function"],
-                exposed_function["interval"], 
+            d = self.callExposedFunction(
+                exposed_function["function"], 
                 kwargs, 
                 function_name, 
                 uuid=uuid,
                 reservation_fast_cache=job["reservation_cache"])
-
-    def _callExposedFunction(
-        self, 
-        func, 
-        interval,
-        kwargs, 
-        function_name, 
-        uuid=None, 
-        reservation_fast_cache=None):
-        d = self.callExposedFunction(
-            func, 
-            kwargs, 
-            function_name, 
-            uuid=uuid,
-            reservation_fast_cache=reservation_fast_cache)
-        d.addCallback(self._jobCountCallback)
-        d.addErrback(self._jobCountErrback)
-        d.addCallback(self._setNextRequest, uuid, interval, function_name)
+            d.addCallback(self._jobCountCallback)
+            d.addErrback(self._jobCountErrback)
+            d.addCallback(self._setNextRequest, uuid, exposed_function["interval"], function_name)
         
-    def _jobCountCallback(self, data):
+    def _jobCountCallback(self, data=None):
         self.job_count += 1
         
     def _jobCountErrback(self, error):

@@ -7,6 +7,7 @@ import os
 import time
 from uuid import uuid4
 from twisted.internet import reactor
+from twisted.internet.threads import deferToThread
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
 from ..aws import AmazonS3, AmazonSDB
 from ..aws import sdb_now
@@ -224,7 +225,7 @@ class BaseServer(object):
         d.addCallback(self._callExposedFunctionCallback, function_name, uuid)
         d.addErrback(self._callExposedFunctionErrback, function_name, uuid)
         return d
-        
+            
     def _reservationCacheCallback(self, data, func, kwargs, function_name, uuid):
         LOGGER.debug("Got reservation cache for %s" % uuid)
         kwargs["reservation_cache"] = data

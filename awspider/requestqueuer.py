@@ -6,6 +6,11 @@ from twisted.web.client import HTTPClientFactory, _parse
 import dateutil.parser
 from .unicodeconverter import convertToUTF8
 from OpenSSL import SSL
+import logging
+
+
+LOGGER = logging.getLogger("main")
+
 
 class AllCipherSSLClientContextFactory(ssl.ClientContextFactory):
     """A context factory for SSL clients that uses all ciphers."""
@@ -257,28 +262,22 @@ class RequestQueuer(object):
         return True
 
     def _checkActive(self):
-        
-        #self.pending_reqs = dict([(x[0],x[1]) for x in filter(lambda x:len(x[1]) > 0, self.pending_reqs.items())])
-        while self.getActive() < self.max_simul_reqs and self.getPending() > 0:        
-            in_loop_req_count = 0
+        while self.getActive() < self.max_simul_reqs and self.getPending() > 0:     
             hosts = self.pending_reqs.keys()
+            dispatched_requests = False
             for host in hosts:
-                if self._hostRequestCheck(host):
-                    if len(self.pending_reqs[host]) == 0:
-                        del self.pending_reqs[host]
-                        continue
-                    else:
-                        req = self.pending_reqs[host].pop(0)
-                    in_loop_req_count += 1
+                if len(self.pending_reqs[host]) == 0:
+                    del self.pending_reqs[host]
+                elif self._hostRequestCheck(host):
+                    dispatched_requests = True
+                    req = self.pending_reqs[host].pop(0)
                     d = self._getPage(req)
                     d.addCallback(self._requestComplete, req["deferred"], host)
                     d.addErrback(self._requestError, req["deferred"], host)
                     self.last_req[host] = time.time()
                     self.active_reqs[host] = self.active_reqs.get(host, 0) + 1
-            if in_loop_req_count == 0:
-                reactor.callLater(.1, self._checkActive)
+            if not dispatched_requests:
                 return
- 
 
     def _requestComplete(self, response, deferred, host):
         self.active_reqs[host] -= 1
@@ -286,7 +285,7 @@ class RequestQueuer(object):
         deferred.callback(response)
         return None
 
-    def _requestError(self, error, deferred, host):
+    def _requestError(self, error, deferred, host):     
         self.active_reqs[host] -= 1
         self._checkActive()
         deferred.errback(error)

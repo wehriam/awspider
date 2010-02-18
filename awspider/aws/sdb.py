@@ -710,8 +710,6 @@ class AmazonSDB:
                                     previous_results=results,
                                     total_box_usage=total_box_usage,
                                     max_results=max_results)
-        if max_results > 0:
-            results = dict(results.items()[:max_results])
         LOGGER.debug("""Select:\n'%s'\nBox usage: %s""" % (
             select_expression,
             total_box_usage))
