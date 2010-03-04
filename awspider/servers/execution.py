@@ -43,9 +43,9 @@ class ExecutionServer(BaseServer):
             aws_s3_storage_bucket=None,
             aws_sdb_coordination_domain=None,
             aws_s3_reservation_cache_bucket=None,
-            max_simultaneous_requests=150,
-            max_requests_per_host_per_second=1,
-            max_simultaneous_requests_per_host=5,
+            max_simultaneous_requests=100,
+            max_requests_per_host_per_second=0,
+            max_simultaneous_requests_per_host=0,
             port=5001, 
             log_file='executionserver.log',
             log_directory=None,
@@ -438,7 +438,7 @@ class ExecutionServer(BaseServer):
         return d
 
     def query(self, data=None):
-        if len(self.job_queue) > 100:
+        if len(self.job_queue) > 1000:
             LOGGER.debug("Skipping query. %s jobs already active." % len(self.job_queue))
             return
         if self.querying_for_jobs:

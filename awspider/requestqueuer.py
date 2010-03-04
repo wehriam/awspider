@@ -277,8 +277,10 @@ class RequestQueuer(object):
                     self.last_req[host] = time.time()
                     self.active_reqs[host] = self.active_reqs.get(host, 0) + 1
             if not dispatched_requests:
-                return
-
+                break
+        if self.getPending() > 0:
+            reactor.callLater(.1, self._checkActive)
+            
     def _requestComplete(self, response, deferred, host):
         self.active_reqs[host] -= 1
         self._checkActive()

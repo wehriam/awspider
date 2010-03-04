@@ -48,7 +48,7 @@ class BaseServer(object):
                  aws_s3_storage_bucket=None,
                  aws_s3_reservation_cache_bucket=None,
                  aws_sdb_coordination_domain=None,
-                 max_simultaneous_requests=0,
+                 max_simultaneous_requests=100,
                  max_requests_per_host_per_second=0,
                  max_simultaneous_requests_per_host=0,
                  log_file=None,
