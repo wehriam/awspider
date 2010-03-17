@@ -1,6 +1,7 @@
 import cPickle
 import time
 import pprint
+import re
 from twisted.web.client import _parse
 from uuid import uuid5, NAMESPACE_DNS
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
@@ -34,7 +35,7 @@ class ExecutionServer(BaseServer):
     querying_for_jobs = False
     reservation_update_queue = []
     current_sql = ""
-    
+    last_job_query_count = 0
     def __init__(self,
             aws_access_key_id, 
             aws_secret_access_key, 
@@ -223,7 +224,10 @@ class ExecutionServer(BaseServer):
             "pending_requests":server_data["pending_requests"],
             "current_timestamp":server_data["current_timestamp"],
             "job_queue":len(self.job_queue),
-            "current_sql":self.current_sql.replace("\n", "")}
+            "active_jobs":len(self.active_jobs),
+            "queued_jobs":len(self.queued_jobs),
+            "current_sql":self.current_sql.replace("\n", ""),
+            "last_job_query_count":self.last_job_query_count}
         if self.uuid_limits["start"] is None and self.uuid_limits["end"] is not None:
             attributes["range"] = "Start - %s" % self.uuid_limits["end"]
         elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is None:
@@ -331,6 +335,7 @@ class ExecutionServer(BaseServer):
             self.job_queue = filter(self.testJobByStart, self.job_queue)
         elif self.uuid_limits["start"] is not None and self.uuid_limits["end"] is not None:
             self.job_queue = filter(self.testJobByStartAndEnd, self.job_queue)
+        self.queued_jobs = dict((x["uuid"], True) for x in self.job_queue)
         LOGGER.info("Abandoned %s jobs that were out of range." % (job_queue_length - len(self.job_queue)))
         LOGGER.debug("Updated UUID limits to: %s" % self.uuid_limits)
     
@@ -463,9 +468,10 @@ class ExecutionServer(BaseServer):
                 self.aws_sdb_reservation_domain, 
                 sdb_now(offset=self.time_offset),
                 uuid_limit_clause)
+        sql = re.sub(r"\s\s*", " ", sql);
         self.current_sql = sql
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
-        d = self.sdb.select(sql, max_results=self.reservation_check_interval * 30)
+        d = self.sdb.select(sql)
         d.addCallback(self._queryCallback)
         d.addErrback(self._queryErrback)
 
@@ -477,6 +483,7 @@ class ExecutionServer(BaseServer):
         LOGGER.info("Fetched %s jobs." % len(data))
         self.querying_for_jobs = False
         # Iterate through the reservation data returned from SimpleDB
+        self.last_job_query_count = len(data)
         for uuid in data:
             if uuid in self.active_jobs or uuid in self.queued_jobs:
                 continue

@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 import os
 import time
+from decimal import Decimal
 from uuid import uuid4
 from twisted.internet import reactor
 from twisted.internet.threads import deferToThread
@@ -437,7 +438,7 @@ class BaseServer(object):
         active_requests_by_host = self.rq.getActiveRequestsByHost()
         pending_requests_by_host = self.rq.getPendingRequestsByHost()
         data = {
-            "load_avg":os.getloadavg(),
+            "load_avg":[str(Decimal(str(x), 2)) for x in os.getloadavg()],
             "running_time":running_time,
             "cost":cost,
             "active_requests_by_host":active_requests_by_host,

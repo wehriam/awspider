@@ -75,7 +75,7 @@ class PageGetter:
             timeout=60, 
             cookies=None, 
             follow_redirect=1, 
-            prioritize=True,
+            prioritize=False,
             hash_url=None, 
             cache=0,
             content_sha1=None,

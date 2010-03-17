@@ -103,7 +103,7 @@ class AdminServer(BaseServer):
         return d
     
     def _peerCheckCallback(self, data):
-        LOGGER.info("Got server data:\n%s" % PRETTYPRINTER.pformat(data))
+        LOGGER.info("Got server data:\n%s" % PRETTYPRINTER.pformat(data.values()))
         ip_addresses = [x['public_ip'][0] for x in data.values()]
         LOGGER.info("%s machines responding. %s" % (len(data), ip_addresses))
         
