@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID
 import time
 import random
 import logging
@@ -11,10 +11,10 @@ from MySQLdb.cursors import DictCursor
 from twisted.internet.defer import Deferred
 from twisted.internet import task
 from twisted.internet.threads import deferToThread
-from .base import LOGGER
+from .base import BaseServer, LOGGER
 from ..resources import HeapResource
 
-class HeapServer():
+class HeapServer(BaseServer):
     
     network_information = {}
     heap = []
@@ -39,16 +39,14 @@ class HeapServer():
             host=mysql_host, 
             cp_reconnect=True, 
             cursorclass=DictCursor)
-        # Deferred that fires after the DB is synced. 
-        # Returned by HeapServer::start()
-        self.start_deferred = Deferred()
         # HTTP interface
         resource = HeapResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
         # Logging
-        self._setupLogging(log_file, log_directory, log_level)
+        BaseServer.__init__(self)
         
     def start(self):
+        self.function_names = self.functions.keys()
         reactor.callWhenRunning(self._start)
         # Setup shutdown trigger.
         self.shutdown_trigger_id = reactor.addSystemEventTrigger(
@@ -59,7 +57,7 @@ class HeapServer():
         
     def _start(self, start=0):
         # Select the entire spider_service DB, 10k rows at at time.
-        sql = "SELECT uuid, type FROM spider_service ORDER BY id LIMIT %s, 10000" % start
+        sql = "SELECT uuid, type, account_id FROM spider_service ORDER BY id LIMIT %s, 10000" % start
         LOGGER.debug(sql)
         d = self.mysql.runQuery(sql)
         d.addCallback(self._startCallback, start)
@@ -70,13 +68,14 @@ class HeapServer():
         # Add rows to heap. The second argument is interval, would be 
         # based on the plugin's interval setting, random for now.
         for row in data:
-            self.addToHeap(row["uuid"], random.randint(10,100))
+            self.addToHeap(row["uuid"], row["type"], row["account_id"])
         # Load next chunk.
-        if len(data) >= 10000:
-            return self._start(start=start + 10000)
+        #if len(data) >= 10000:
+        #    return self._start(start=start + 10000)
         # Done loading!
-        self.start_deferred.callback(True)
         self.enqueue()
+        d = BaseServer.start(self)   
+        return d
     
     def _startErrback(self, error):
         return error
@@ -89,50 +88,34 @@ class HeapServer():
         deferToThread(self._enqueue)
         
     def _enqueue(self):
-        now = time.time()
+        now = int(time.time())
         LOGGER.debug("Enqueing")
         # Compare the heap min timestamp with now().
         # If it's time for the item to be queued, pop it, update the 
         # timestamp and add it back to the heap for the next go round.
         while self.heap[0][0] < now:
             job = heappop(self.heap)
-            self.addToQueue(job)
-            new_job = (now + job[1][1], job[1])
+            self.addToQueue(job[1])
+            new_job = (now + job[1][3], job[1])
             heappush(self.heap, new_job)
         # Check again in a second.
         reactor.callLater(1, self.enqueue)
         
     def addToQueue(self, job):
+        job = (
+            UUID(int=job[0]).hex, # UUID as 32 character hex
+            self.function_names[job[1]], # Full type string
+            job[2]) # Account ID
+        #print job
         # Presumably we'd add to RabbitMQ here.
         pass
     
-    def addToHeap(self, uuid, interval):
+    def addToHeap(self, uuid, type, account_id):
+        print (uuid, type, account_id, int(self.functions[type]['interval']))
+        uuid = UUID(uuid).int
+        interval = int(self.functions[type]['interval'])
+        type = self.function_names.index(type)
+        account_id = int(account_id)
+        enqueue_time = int(time.time() + interval)
         # Add a UUID to the heap.
-        heappush(self.heap, (time.time() + interval, (uuid, interval)))
-
-    def _setupLogging(self, log_file, log_directory, log_level):
-        if log_directory is None:
-            self.logging_handler = logging.StreamHandler()
-        else:
-            self.logging_handler = logging.handlers.TimedRotatingFileHandler(
-                os.path.join(log_directory, log_file), 
-                when='D', 
-                interval=1)
-        log_format = "%(levelname)s: %(message)s %(pathname)s:%(lineno)d"
-        self.logging_handler.setFormatter(logging.Formatter(log_format))
-        LOGGER.addHandler(self.logging_handler)
-        log_level = log_level.lower()
-        log_levels = {
-            "debug":logging.DEBUG, 
-            "info":logging.INFO, 
-            "warning":logging.WARNING, 
-            "error":logging.ERROR,
-            "critical":logging.CRITICAL
-        }
-        if log_level in log_levels:
-            LOGGER.setLevel(log_levels[log_level])
-        else:
-            LOGGER.setLevel(logging.DEBUG)     
-            def start(self):
-                reactor.callWhenRunning(self._start)
-                return self.start_deferred
+        heappush(self.heap, (enqueue_time, (uuid, type, account_id, interval)))
