@@ -16,7 +16,6 @@ from ..resources import HeapResource
 
 class HeapServer(BaseServer):
     
-    network_information = {}
     heap = []
     
     def __init__(self,
@@ -48,16 +47,11 @@ class HeapServer(BaseServer):
     def start(self):
         self.function_names = self.functions.keys()
         reactor.callWhenRunning(self._start)
-        # Setup shutdown trigger.
-        self.shutdown_trigger_id = reactor.addSystemEventTrigger(
-            'before', 
-            'shutdown', 
-            self.shutdown)
         return self.start_deferred
         
     def _start(self, start=0):
         # Select the entire spider_service DB, 10k rows at at time.
-        sql = "SELECT uuid, type, account_id FROM spider_service ORDER BY id LIMIT %s, 10000" % start
+        sql = "SELECT uuid, type FROM spider_service ORDER BY id LIMIT %s, 10000" % start
         LOGGER.debug(sql)
         d = self.mysql.runQuery(sql)
         d.addCallback(self._startCallback, start)
@@ -68,11 +62,11 @@ class HeapServer(BaseServer):
         # Add rows to heap. The second argument is interval, would be 
         # based on the plugin's interval setting, random for now.
         for row in data:
-            self.addToHeap(row["uuid"], row["type"], row["account_id"])
+            self.addToHeap(row["uuid"], row["type"])
         # Load next chunk.
-        #if len(data) >= 10000:
-        #    return self._start(start=start + 10000)
-        # Done loading!
+        if len(data) >= 10000:
+            return self._start(start=start + 10000)
+        # Done loading, start queuing
         self.enqueue()
         d = BaseServer.start(self)   
         return d
@@ -89,33 +83,30 @@ class HeapServer(BaseServer):
         
     def _enqueue(self):
         now = int(time.time())
-        LOGGER.debug("Enqueing")
         # Compare the heap min timestamp with now().
         # If it's time for the item to be queued, pop it, update the 
         # timestamp and add it back to the heap for the next go round.
         while self.heap[0][0] < now:
             job = heappop(self.heap)
             self.addToQueue(job[1])
-            new_job = (now + job[1][3], job[1])
+            new_job = (now + job[1][1], job[1])
             heappush(self.heap, new_job)
         # Check again in a second.
         reactor.callLater(1, self.enqueue)
         
     def addToQueue(self, job):
-        job = (
-            UUID(int=job[0]).hex, # UUID as 32 character hex
-            self.function_names[job[1]], # Full type string
-            job[2]) # Account ID
-        #print job
+        uuid = job[0] #UUID().bytes
         # Presumably we'd add to RabbitMQ here.
         pass
     
-    def addToHeap(self, uuid, type, account_id):
-        print (uuid, type, account_id, int(self.functions[type]['interval']))
-        uuid = UUID(uuid).int
-        interval = int(self.functions[type]['interval'])
-        type = self.function_names.index(type)
-        account_id = int(account_id)
+    def addToHeap(self, uuid, type):
+        uuid = UUID(uuid).bytes
+        interval = 10 #int(self.functions[type]['interval'])
+        try:
+            type = self.function_names.index(type)
+        except:
+            print type
+            return
         enqueue_time = int(time.time() + interval)
         # Add a UUID to the heap.
-        heappush(self.heap, (enqueue_time, (uuid, type, account_id, interval)))
+        heappush(self.heap, (enqueue_time, (uuid, interval)))

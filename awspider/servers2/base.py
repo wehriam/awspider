@@ -25,7 +25,7 @@ class ReservationCachingException(Exception):
     pass
 
 class BaseServer(object):
-    
+
     logging_handler = None
     shutdown_trigger_id = None
     uuid = uuid4().hex
