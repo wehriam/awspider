@@ -89,14 +89,13 @@ class HeapServer(BaseServer):
         while self.heap[0][0] < now:
             job = heappop(self.heap)
             self.addToQueue(job[1])
-            new_job = (now + job[1][1], job[1])
+            new_job = (now + job[1][1], job[1][0])
             heappush(self.heap, new_job)
         # Check again in a second.
         reactor.callLater(1, self.enqueue)
         
-    def addToQueue(self, job):
-        uuid = job[0] #UUID().bytes
-        # Presumably we'd add to RabbitMQ here.
+    def addToQueue(self, uuid):
+        # Presumably we'd add to RabbitMQ here, uuid is already in bytes format.
         pass
     
     def addToHeap(self, uuid, type):
