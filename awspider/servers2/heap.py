@@ -37,7 +37,6 @@ class HeapServer(BaseServer):
             log_file='heapserver.log',
             log_directory=None,
             log_level="debug"):
-            
         # Create MySQL connection.
         self.mysql = adbapi.ConnectionPool(
             "MySQLdb", 
@@ -48,19 +47,15 @@ class HeapServer(BaseServer):
             host=mysql_host, 
             cp_reconnect=True, 
             cursorclass=DictCursor)
-            
         # Create AMQP Connection
         self.amqp_username = amqp_username
         self.amqp_password = amqp_password
         self.amqp_queue = amqp_queue
         self.amqp_exchange = amqp_exchange
-        
         self.amqp = AMQP.createClient(amqp_host, amqp_vhost, amqp_port)
-            
         # HTTP interface
         resource = HeapResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
-        
         # Logging
         BaseServer.__init__(self)
         
@@ -125,26 +120,19 @@ class HeapServer(BaseServer):
         yield conn.authenticate(self.amqp_username, self.amqp_password)
         chan = yield conn.channel(1)
         yield chan.channel_open()
-
         # Create queue
         yield chan.queue_declare(queue=self.amqp_queue, durable=False, exclusive=False, auto_delete=False)
         yield chan.exchange_declare(exchange=self.amqp_exchange, type="fanout", durable=False, auto_delete=False)
         yield chan.queue_bind(queue=self.amqp_queue, exchange=self.amqp_exchange)
-
         def send_messages():
             def message_iterator():
                 for uuid in uuids:
                     msg = Content(uuid)
                     msg["delivery mode"] = 2
-
                     chan.basic_publish(exchange=self.amqp_exchange, content=msg)
-
                     yield None
-
             return task.coiterate(message_iterator())
-
         yield send_messages()
-
         # Shut things down
         LOGGER.info('Closing broker connection')
         yield chan.channel_close()
