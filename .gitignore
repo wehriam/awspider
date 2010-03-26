@@ -1,1 +1,7 @@
 tests/config.yaml
+.DS_Store
+*.*~
+*.py[co]
+AWSpider.egg-info
+build
+dist
