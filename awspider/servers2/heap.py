@@ -108,10 +108,8 @@ class HeapServer(BaseServer):
             queue_items_a(job[1])
             new_job = (now + job[1][1], job[1])
             heappush(self.heap, new_job)
-        
         # add items to the queue
         self.addToQueue(queue_items)
-        
         # Check again in a second.
         reactor.callLater(1, self.enqueue)
         
