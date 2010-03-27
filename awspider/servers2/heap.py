@@ -111,7 +111,7 @@ class HeapServer(BaseServer):
         while self.heap[0][0] < now:
             job = heappop(self.heap)
             queue_items_a(job[1])
-            new_job = (now + job[1][1], job[1][0])
+            new_job = (now + job[1][1], job[1])
             heappush(self.heap, new_job)
         
         # add items to the queue
