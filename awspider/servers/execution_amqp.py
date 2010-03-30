@@ -117,9 +117,13 @@ class ExecutionServerAmqp(BaseServer):
         auth = conn.authenticate(self.amqp_username, self.amqp_password)
         LOGGER.info("Authenticated. Ready to recieve messages")
         auth.addCallback(self._startCallback3)
+        auth.addErrback(self._errCallback3)
         
+    def _errCallback3(self, error):
+        LOGGER.error('%s' % error.printBriefTraceback)
+    
     def _startCallback3(self, conn):
-        LOGGER.debug(dir(conn))
+        LOGGER.debug('foo')
         # chan = conn.channel(1)
         # chan.channel_open()
         # chan.queue_bind(queue=self.amqp_queue, exchange=self.amqp_exchange)
