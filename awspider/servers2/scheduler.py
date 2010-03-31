@@ -75,6 +75,7 @@ class SchedulerServer(BaseServer):
     def _start(self):
         # Load in names of functions supported by plugins
         self.function_names = self.functions.keys()
+        LOGGER.info('Connecting to broker.')
         self.conn = yield AMQP.createClient(
             self.amqp_host, 
             self.amqp_vhost, 

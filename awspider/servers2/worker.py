@@ -2,9 +2,10 @@ from .base import BaseServer, LOGGER
 from ..resources2 import WorkerResource
 from ..networkaddress import getNetworkAddress
 from ..amqp import amqp as AMQP
-from twisted.internet import reactor
+from twisted.internet import reactor, defer
 from twisted.web import server
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred, inlineCallbacks
+from uuid import UUID
 import pprint
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
@@ -31,6 +32,7 @@ class WorkerServer(BaseServer):
             amqp_queue=None,
             amqp_exchange=None,
             amqp_port=5672,
+            amqp_prefetch_size=0,
             max_simultaneous_requests=100,
             max_requests_per_host_per_second=0,
             max_simultaneous_requests_per_host=0,
@@ -51,6 +53,7 @@ class WorkerServer(BaseServer):
         self.amqp_password = amqp_password
         self.amqp_queue = amqp_queue
         self.amqp_exchange = amqp_exchange
+        self.amqp_prefetch_size = amqp_prefetch_size
         BaseServer.__init__(
             self,
             aws_access_key_id=aws_access_key_id, 
@@ -71,17 +74,32 @@ class WorkerServer(BaseServer):
     @inlineCallbacks
     def _start(self):
         yield self.getNetworkAddress()
+        LOGGER.info('Connecting to broker.')
         self.conn = yield AMQP.createClient(
             self.amqp_host, 
             self.amqp_vhost, 
             self.amqp_port)
-        LOGGER.info('Connecting to broker.')
         self.auth = yield self.conn.authenticate(
             self.amqp_username, 
             self.amqp_password)
-        LOGGER.info("Authenticated.")
+        self.chan = yield self.conn.channel(1)
+        yield self.chan.channel_open()
+        yield self.chan.basic_qos(prefetch_size=self.amqp_prefetch_size)
+        # Create Queue
+        yield self.chan.queue_declare(
+            queue=self.amqp_queue, 
+            durable=False, 
+            exclusive=False, 
+            auto_delete=False)
+        yield self.chan.queue_bind(
+            queue=self.amqp_queue, 
+            exchange=self.amqp_exchange)
+        yield self.chan.basic_consume(queue=self.amqp_queue, 
+            no_ack=True, 
+            consumer_tag="awspider_consumer")
+        self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
-        yield self.doSomething()
+        self.dequeue()
 
     @inlineCallbacks
     def shutdown(self):
@@ -93,18 +111,19 @@ class WorkerServer(BaseServer):
         yield None # You've got to yield something.
         # Closing the connection
         
-    def doSomething(self):
-        LOGGER.debug("Doing something!")
-        self.doSomethingCallLater = reactor.callLater(1, self.doSomething)
-        # chan = conn.channel(1)
-        # chan.channel_open()
-        # chan.queue_bind(queue=self.amqp_queue, exchange=self.amqp_exchange)
-        # chan.basic_consume(queue=self.amqp_queue, no_ack=True, consumer_tag="awspider_consumer")
-        # queue = conn.queue("awspider_consumer")
-        # while True:
-        #     msg = queue.get()
-        #     uuid = UUID(bytes=msg.content.body)
-        #     LOGGER.info('Recieved UUID %s from Queue' % uuid)
+    def dequeue(self):
+        msgs = self.queue.get()
+        deferreds = [self.queue.get() for i in range(1000)]
+        defer.DeferredList(deferreds, consumeErrors=True).addCallbacks(self._dequeue, self._dequeueErr)
+        
+    def _dequeue(self, msgs):
+        uuids = [UUID(bytes=msg[1].content.body) for msg in msgs]
+        [LOGGER.debug('Recieved UUID: %s' % uuid.hex) for uuid in uuids]
+        self.dequeueCallLater = reactor.callLater(1, self.dequeue)
+        
+    def _dequeueErr(self, error):
+        LOGGER.error(error.printBriefTraceback)
+        raise
             
     def getNetworkAddress(self):
         d = getNetworkAddress()
