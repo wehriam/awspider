@@ -8,7 +8,7 @@ from twisted.internet import reactor, task
 from twisted.web import server
 from twisted.enterprise import adbapi
 from MySQLdb.cursors import DictCursor
-from twisted.internet.defer import Deferred
+from twisted.internet.defer import Deferred, inlineCallbacks
 from twisted.internet import task
 from twisted.internet.threads import deferToThread
 from txamqp.content import Content
@@ -20,6 +20,7 @@ from ..amqp import amqp as AMQP
 class SchedulerServer(BaseServer):
     
     heap = []
+    enqueueCallLater = None
     
     def __init__(self,
             mysql_username,
@@ -48,7 +49,10 @@ class SchedulerServer(BaseServer):
             host=mysql_host, 
             cp_reconnect=True, 
             cursorclass=DictCursor)
-        # Create AMQP Connection
+        # AMQP connection parameters
+        self.amqp_host = amqp_host
+        self.amqp_vhost = amqp_vhost
+        self.amqp_port = amqp_port
         self.amqp_username = amqp_username
         self.amqp_password = amqp_password
         self.amqp_queue = amqp_queue
@@ -66,18 +70,17 @@ class SchedulerServer(BaseServer):
     def start(self):
         reactor.callWhenRunning(self._start)
         return self.start_deferred
-        
+    
+    @inlineCallbacks   
     def _start(self):
         # Load in names of functions supported by plugins
         self.function_names = self.functions.keys()
-        d = AMQP.createClient(amqp_host, amqp_vhost, amqp_port)
-        d.addCallback(self._startCallback)
-        return d
-        
-    def _startCallback(self, conn):
-        # Setup connection to AMQP server
-        yield conn.authenticate(self.amqp_username, self.amqp_password)
-        self.chan = yield conn.channel(1)
+        self.conn = yield AMQP.createClient(
+            self.amqp_host, 
+            self.amqp_vhost, 
+            self.amqp_port)
+        yield self.conn.authenticate(self.amqp_username, self.amqp_password)
+        self.chan = yield self.conn.channel(1)
         yield self.chan.channel_open()
         # Create Queue
         yield self.chan.queue_declare(
@@ -95,7 +98,7 @@ class SchedulerServer(BaseServer):
             queue=self.amqp_queue, 
             exchange=self.amqp_exchange)
         # Build heap from data in MySQL
-        return self._loadFromMySQL()
+        yield self._loadFromMySQL()
         
     def _loadFromMySQL(self, start=0):
         # Select the entire spider_service DB, 10k rows at at time.
@@ -112,8 +115,8 @@ class SchedulerServer(BaseServer):
         for row in data:
             self.addToHeap(row["uuid"], row["type"])
         # Load next chunk.
-        if len(data) >= 10000:
-            return self._loadFromMySQL(start=start + 10000)
+        #if len(data) >= 10000:
+        #    return self._loadFromMySQL(start=start + 10000)
         # Done loading, start queuing
         self.enqueue()
         d = BaseServer.start(self)   
@@ -122,13 +125,17 @@ class SchedulerServer(BaseServer):
     def _loadFromMySQLErrback(self, error):
         return error
     
+    @inlineCallbacks
     def shutdown(self):
+        try:
+            self.enqueueCallLater.cancel()
+        except:
+            pass
         # Shut things down
         LOGGER.info('Closing broker connection')
-        yield chan.channel_close()
-        chan0 = yield conn.channel(0)
+        yield self.chan.channel_close()
+        chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
-        pass
     
     def enqueue(self):
         # Defer this to a thread so we don't block on the web interface.
@@ -141,6 +148,7 @@ class SchedulerServer(BaseServer):
         # timestamp and add it back to the heap for the next go round.
         queue_items = []
         queue_items_a = queue_items.append
+        LOGGER.debug("%s:%s" % (self.heap[0][0], now))
         while self.heap[0][0] < now:
             job = heappop(self.heap)
             queue_items_a(job[1])
@@ -149,20 +157,19 @@ class SchedulerServer(BaseServer):
         # add items to the queue
         self.addToQueue(queue_items)
         # Check again in a second.
-        reactor.callLater(1, self.enqueue)
-        
+        self.enqueueCallLater = reactor.callLater(1, self.enqueue)
+    
+    @inlineCallbacks 
     def addToQueue(self, uuids):
-
         def send_messages():
             def message_iterator():
                 for uuid in uuids:
                     msg = Content(uuid)
                     msg["delivery mode"] = 2
-                    chan.basic_publish(exchange=self.amqp_exchange, content=msg)
+                    self.chan.basic_publish(exchange=self.amqp_exchange, content=msg)
                     yield None
             return task.coiterate(message_iterator())
         yield send_messages()
-
             
     def addToHeap(self, uuid, type):
         uuid = UUID(uuid).bytes

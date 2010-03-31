@@ -4,7 +4,7 @@ from ..networkaddress import getNetworkAddress
 from ..amqp import amqp as AMQP
 from twisted.internet import reactor
 from twisted.web import server
-from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
+from twisted.internet.defer import Deferred, DeferredList, maybeDeferred, inlineCallbacks
 import pprint
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
@@ -17,6 +17,7 @@ class WorkerServer(BaseServer):
     job_queue = []
     job_count = 0
     simultaneous_jobs = 50
+    doSomethingCallLater = None
     
     def __init__(self,
             aws_access_key_id, 
@@ -42,11 +43,14 @@ class WorkerServer(BaseServer):
         resource = WorkerResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
         # Create AMQP Connection
+        # AMQP connection parameters
+        self.amqp_host = amqp_host
+        self.amqp_vhost = amqp_vhost
+        self.amqp_port = amqp_port
         self.amqp_username = amqp_username
         self.amqp_password = amqp_password
         self.amqp_queue = amqp_queue
         self.amqp_exchange = amqp_exchange
-        self.amqp = AMQP.createClient(amqp_host, amqp_vhost, amqp_port)
         BaseServer.__init__(
             self,
             aws_access_key_id=aws_access_key_id, 
@@ -64,33 +68,34 @@ class WorkerServer(BaseServer):
         reactor.callWhenRunning(self._start)
         return self.start_deferred
         
+    @inlineCallbacks
     def _start(self):
-        deferreds = []
-        deferreds.append(self.getNetworkAddress())
-        d = DeferredList(deferreds, consumeErrors=True)
-        d.addCallback(self._startCallback)
-        
-    def _startCallback(self, data):
-        for row in data:
-            if row[0] == False:
-                d = self.shutdown()
-                d.addCallback(self._startHandleError, row[1])
-                return d
-        d = BaseServer.start(self)   
-        self.amqp.addCallback(self._startCallback2)
-        
-    def _startCallback2(self, conn):
+        yield self.getNetworkAddress()
+        self.conn = yield AMQP.createClient(
+            self.amqp_host, 
+            self.amqp_vhost, 
+            self.amqp_port)
         LOGGER.info('Connecting to broker.')
-        auth = conn.authenticate(self.amqp_username, self.amqp_password)
-        LOGGER.info("Authenticated. Ready to recieve messages")
-        auth.addCallback(self._startCallback3)
-        auth.addErrback(self._errCallback3)
+        self.auth = yield self.conn.authenticate(
+            self.amqp_username, 
+            self.amqp_password)
+        LOGGER.info("Authenticated.")
+        yield BaseServer.start(self)
+        yield self.doSomething()
+
+    @inlineCallbacks
+    def shutdown(self):
+        try:
+            self.doSomethingCallLater.cancel()
+        except:
+            pass
+        LOGGER.debug("Closting connection")
+        yield None # You've got to yield something.
+        # Closing the connection
         
-    def _errCallback3(self, error):
-        LOGGER.error('%s' % error.printBriefTraceback)
-    
-    def _startCallback3(self, conn):
-        LOGGER.debug('foo')
+    def doSomething(self):
+        LOGGER.debug("Doing something!")
+        self.doSomethingCallLater = reactor.callLater(1, self.doSomething)
         # chan = conn.channel(1)
         # chan.channel_open()
         # chan.queue_bind(queue=self.amqp_queue, exchange=self.amqp_exchange)
