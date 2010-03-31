@@ -4,7 +4,7 @@ import random
 import logging
 import logging.handlers
 from heapq import heappush, heappop
-from twisted.internet import reactor, task
+from twisted.internet import reactor, task, defer
 from twisted.web import server
 from twisted.enterprise import adbapi
 from MySQLdb.cursors import DictCursor
@@ -151,7 +151,6 @@ class SchedulerServer(BaseServer):
         LOGGER.debug("%s:%s" % (self.heap[0][0], now))
         while self.heap[0][0] < now:
             job = heappop(self.heap)
-            LOGGER.debug('job::%s' % repr(job[1][0]))
             queue_items_a(job[1][0])
             new_job = (now + job[1][1], job[1])
             heappush(self.heap, new_job)
@@ -162,16 +161,21 @@ class SchedulerServer(BaseServer):
     
     @inlineCallbacks 
     def addToQueue(self, uuids):
-        def send_messages():
-            def message_iterator():
-                for uuid in uuids:
-                    msg = Content(uuid)
-                    msg["delivery mode"] = 2
-                    self.chan.basic_publish(exchange=self.amqp_exchange, content=msg)
-                    yield None
-            return task.coiterate(message_iterator())
-        yield send_messages()
-            
+        msgs = []
+        msgs_a = msgs.append
+        for uuid in uuids:
+            msg = Content(uuid)
+            msg["delivery mode"] = 2
+            msgs_a(msg)
+        deferreds = [self.chan.basic_publish(exchange=self.amqp_exchange, content=msg) for msg in msgs]
+        defer.DeferredList(deferreds, consumeErrors=True).addCallback(self._addToQueueComplete, self._addToQueueErr)
+        
+    def _addToQueueComplete(self, data):
+        LOGGER('Completed adding items into the queue...')
+        
+    def _addToQueueErr(self, error):
+        LOGGER.error(error.printBriefTraceback)
+        
     def addToHeap(self, uuid, type):
         uuid = UUID(uuid).bytes
         interval = 10 #int(self.functions[type]['interval'])
