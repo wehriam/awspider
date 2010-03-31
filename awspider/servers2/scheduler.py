@@ -154,24 +154,18 @@ class SchedulerServer(BaseServer):
             queue_items_a(job[1][0])
             new_job = (now + job[1][1], job[1])
             heappush(self.heap, new_job)
-        # add items to the queue
-        self.addToQueue(queue_items)
-        # Check again in a second.
-        self.enqueueCallLater = reactor.callLater(1, self.enqueue)
-    
-    @inlineCallbacks 
-    def addToQueue(self, uuids):
-        msgs = []
-        msgs_a = msgs.append
-        for uuid in uuids:
-            msg = Content(uuid)
-            msg["delivery mode"] = 2
-            msgs_a(msg)
-        deferreds = [self.chan.basic_publish(exchange=self.amqp_exchange, content=msg) for msg in msgs]
-        defer.DeferredList(deferreds, consumeErrors=True).addCallback(self._addToQueueComplete, self._addToQueueErr)
+        # add items to amqp
+        if queue_items:
+            LOGGER.info('Found %d new uuids, adding them to the queue' % len(queue_items))
+            msgs = [Content(uuid) for uuid in queue_items]
+            deferreds = [self.chan.basic_publish(exchange=self.amqp_exchange, content=msg) for msg in msgs]
+            defer.DeferredList(deferreds, consumeErrors=True).addCallbacks(self._addToQueueComplete, self._addToQueueErr)
+        else:
+            self.enqueueCallLater = reactor.callLater(1, self.enqueue)
         
     def _addToQueueComplete(self, data):
-        LOGGER('Completed adding items into the queue...')
+        LOGGER.info('Completed adding items into the queue...')
+        self.enqueueCallLater = reactor.callLater(1, self.enqueue)
         
     def _addToQueueErr(self, error):
         LOGGER.error(error.printBriefTraceback)
