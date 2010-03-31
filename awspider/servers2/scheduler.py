@@ -13,10 +13,11 @@ from twisted.internet import task
 from twisted.internet.threads import deferToThread
 from txamqp.content import Content
 from .base import BaseServer, LOGGER
-from ..resources import HeapResource
+from ..resources2 import SchedulerResource
 from ..amqp import amqp as AMQP
 
-class HeapServer(BaseServer):
+
+class SchedulerServer(BaseServer):
     
     heap = []
     
@@ -34,7 +35,7 @@ class HeapServer(BaseServer):
             amqp_port=5672,
             mysql_port=3306,
             port=5004, 
-            log_file='heapserver.log',
+            log_file='schedulerserver.log',
             log_directory=None,
             log_level="debug"):
         # Create MySQL connection.
@@ -52,44 +53,81 @@ class HeapServer(BaseServer):
         self.amqp_password = amqp_password
         self.amqp_queue = amqp_queue
         self.amqp_exchange = amqp_exchange
-        self.amqp = AMQP.createClient(amqp_host, amqp_vhost, amqp_port)
         # HTTP interface
-        resource = HeapResource(self)
+        resource = SchedulerResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
-        # Logging
-        BaseServer.__init__(self)
-        
+        # Logging, etc
+        BaseServer.__init__(
+            self,
+            log_file=log_file,
+            log_directory=log_directory,
+            log_level=log_level) 
+    
     def start(self):
-        self.function_names = self.functions.keys()
         reactor.callWhenRunning(self._start)
         return self.start_deferred
         
-    def _start(self, start=0):
+    def _start(self):
+        # Load in names of functions supported by plugins
+        self.function_names = self.functions.keys()
+        d = AMQP.createClient(amqp_host, amqp_vhost, amqp_port)
+        d.addCallback(self._startCallback)
+        return d
+        
+    def _startCallback(self, conn):
+        # Setup connection to AMQP server
+        yield conn.authenticate(self.amqp_username, self.amqp_password)
+        self.chan = yield conn.channel(1)
+        yield self.chan.channel_open()
+        # Create Queue
+        yield self.chan.queue_declare(
+            queue=self.amqp_queue, 
+            durable=False, 
+            exclusive=False, 
+            auto_delete=False)
+        # Create Exchange
+        yield self.chan.exchange_declare(
+            exchange=self.amqp_exchange, 
+            type="fanout", 
+            durable=False, 
+            auto_delete=False)
+        yield self.chan.queue_bind(
+            queue=self.amqp_queue, 
+            exchange=self.amqp_exchange)
+        # Build heap from data in MySQL
+        return self._loadFromMySQL()
+        
+    def _loadFromMySQL(self, start=0):
         # Select the entire spider_service DB, 10k rows at at time.
         sql = "SELECT uuid, type FROM spider_service ORDER BY id LIMIT %s, 10000" % start
         LOGGER.debug(sql)
         d = self.mysql.runQuery(sql)
-        d.addCallback(self._startCallback, start)
-        d.addErrback(self._startErrback)
+        d.addCallback(self._loadFromMySQLCallback, start)
+        d.addErrback(self._loadFromMySQLErrback)
         return d
         
-    def _startCallback(self, data, start):
+    def _loadFromMySQLCallback(self, data, start):
         # Add rows to heap. The second argument is interval, would be 
         # based on the plugin's interval setting, random for now.
         for row in data:
             self.addToHeap(row["uuid"], row["type"])
         # Load next chunk.
         if len(data) >= 10000:
-            return self._start(start=start + 10000)
+            return self._loadFromMySQL(start=start + 10000)
         # Done loading, start queuing
         self.enqueue()
         d = BaseServer.start(self)   
         return d
     
-    def _startErrback(self, error):
+    def _loadFromMySQLErrback(self, error):
         return error
     
     def shutdown(self):
+        # Shut things down
+        LOGGER.info('Closing broker connection')
+        yield chan.channel_close()
+        chan0 = yield conn.channel(0)
+        yield chan0.connection_close()
         pass
     
     def enqueue(self):
@@ -114,14 +152,7 @@ class HeapServer(BaseServer):
         reactor.callLater(1, self.enqueue)
         
     def addToQueue(self, uuids):
-        LOGGER.info("Connecting to broker")
-        yield conn.authenticate(self.amqp_username, self.amqp_password)
-        chan = yield conn.channel(1)
-        yield chan.channel_open()
-        # Create queue
-        yield chan.queue_declare(queue=self.amqp_queue, durable=False, exclusive=False, auto_delete=False)
-        yield chan.exchange_declare(exchange=self.amqp_exchange, type="fanout", durable=False, auto_delete=False)
-        yield chan.queue_bind(queue=self.amqp_queue, exchange=self.amqp_exchange)
+
         def send_messages():
             def message_iterator():
                 for uuid in uuids:
@@ -131,11 +162,7 @@ class HeapServer(BaseServer):
                     yield None
             return task.coiterate(message_iterator())
         yield send_messages()
-        # Shut things down
-        LOGGER.info('Closing broker connection')
-        yield chan.channel_close()
-        chan0 = yield conn.channel(0)
-        yield chan0.connection_close()
+
             
     def addToHeap(self, uuid, type):
         uuid = UUID(uuid).bytes
@@ -143,7 +170,7 @@ class HeapServer(BaseServer):
         try:
             type = self.function_names.index(type)
         except:
-            print type
+            LOGGER.error("Unsupported function type: %s" % type)
             return
         enqueue_time = int(time.time() + interval)
         # Add a UUID to the heap.

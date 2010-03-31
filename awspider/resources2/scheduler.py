@@ -1,6 +1,6 @@
 from .base import BaseResource
 
-class HeapResource(BaseResource):
+class SchedulerResource(BaseResource):
     
     def __init__(self, heapserver):    
         self.heapserver = heapserver
