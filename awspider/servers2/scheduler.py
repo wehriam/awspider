@@ -169,6 +169,7 @@ class SchedulerServer(BaseServer):
         
     def _addToQueueErr(self, error):
         LOGGER.error(error.printBriefTraceback)
+        raise
         
     def addToHeap(self, uuid, type):
         uuid = UUID(uuid).bytes
