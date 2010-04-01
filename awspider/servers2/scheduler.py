@@ -4,11 +4,11 @@ import random
 import logging
 import logging.handlers
 from heapq import heappush, heappop
-from twisted.internet import reactor, task, defer
+from twisted.internet import reactor, task
 from twisted.web import server
 from twisted.enterprise import adbapi
 from MySQLdb.cursors import DictCursor
-from twisted.internet.defer import Deferred, inlineCallbacks
+from twisted.internet.defer import Deferred, inlineCallbacks, DeferredList
 from twisted.internet import task
 from twisted.internet.threads import deferToThread
 from txamqp.content import Content
@@ -160,7 +160,8 @@ class SchedulerServer(BaseServer):
             LOGGER.info('Found %d new uuids, adding them to the queue' % len(queue_items))
             msgs = [Content(uuid) for uuid in queue_items]
             deferreds = [self.chan.basic_publish(exchange=self.amqp_exchange, content=msg) for msg in msgs]
-            defer.DeferredList(deferreds, consumeErrors=True).addCallbacks(self._addToQueueComplete, self._addToQueueErr)
+            d = DeferredList(deferreds, consumeErrors=True)
+            d.addCallbacks(self._addToQueueComplete, self._addToQueueErr)
         else:
             self.enqueueCallLater = reactor.callLater(1, self.enqueue)
         

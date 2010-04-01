@@ -2,7 +2,7 @@ from .base import BaseServer, LOGGER
 from ..resources2 import WorkerResource
 from ..networkaddress import getNetworkAddress
 from ..amqp import amqp as AMQP
-from twisted.internet import reactor, defer
+from twisted.internet import reactor
 from twisted.web import server
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred, inlineCallbacks
 from uuid import UUID
@@ -114,7 +114,8 @@ class WorkerServer(BaseServer):
     def dequeue(self):
         msgs = self.queue.get()
         deferreds = [self.queue.get() for i in range(1000)]
-        defer.DeferredList(deferreds, consumeErrors=True).addCallbacks(self._dequeue, self._dequeueErr)
+        d = DeferredList(deferreds, consumeErrors=True)
+        d.addCallbacks(self._dequeue, self._dequeueErr)
         
     def _dequeue(self, msgs):
         uuids = [UUID(bytes=msg[1].content.body) for msg in msgs]
