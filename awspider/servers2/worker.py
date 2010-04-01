@@ -31,6 +31,7 @@ class WorkerServer(BaseServer):
             amqp_vhost=None,
             amqp_queue=None,
             amqp_exchange=None,
+            resource_mapping=None,
             amqp_port=5672,
             amqp_prefetch_size=0,
             max_simultaneous_requests=100,
@@ -41,6 +42,8 @@ class WorkerServer(BaseServer):
             log_directory=None,
             log_level="debug"):
         self.network_information["port"] = port
+        # Resource Mappings
+        self.resource_mapping = resource_mapping
         # HTTP interface
         resource = WorkerResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
