@@ -180,8 +180,8 @@ class SchedulerServer(BaseServer):
         # lookup if type is in the resource_mapping, if it is
         # then rewrite type to the proper resource
         if self.resource_mapping and self.resource_mapping.has_key(type):
-            LOGGER.info('Remapping resource %s to %s' % (type, resource_mapping[type]))
-            type = resource_mapping[type]
+            LOGGER.info('Remapping resource %s to %s' % (type, self.resource_mapping[type]))
+            type = self.resource_mapping[type]
         uuid = UUID(uuid).bytes
         interval = 10 #int(self.functions[type]['interval'])
         try:
