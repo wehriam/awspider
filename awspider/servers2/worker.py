@@ -149,25 +149,20 @@ class WorkerServer(BaseServer):
     
     def _dequeue(self):
         msgs = self.queue.get()
-        deferreds = [self.queue.get() for i in range(100)]
-        d = DeferredList(deferreds, consumeErrors=True)
-        d.addCallbacks(self._dequeue2, self._dequeueErr)
+        d = self.queue.get()
+        d.addCallback(self._dequeue2)
+        d.addErrback(self._dequeueErr)
     
-    def _dequeue2(self, msgs):
+    def _dequeue2(self, msg):
         # Get the hex version of the UUID from byte string we were sent
-        uuids = [UUID(bytes=msg[1].content.body).hex for msg in msgs if msg[0] == True]
-        deferreds = [self.getAccount(uuid) for uuid in uuids]
-        d = DeferredList(deferreds, consumeErrors=True)
-        d.addCallbacks(self._dequeue3, self._dequeueErr)
+        uuid = UUID(bytes=msg.content.body).hex
+        d = self.getAccount(uuid)
+        d.addCallback(self._dequeue3)
+        d.addErrback(self._dequeueErr)
     
-    def _dequeue3(self, accounts):
-        job_queue = []
-        job_queue_a = job_queue.append
-        [job_queue_a(account[1].copy()) for account in accounts if account[0]==True]
-        # [LOGGER.debug(job) for job in job_queue]
-        LOGGER.info('Adding %d jobs to local job queue(%d)' % (len(job_queue), self.job_count))
-        self.job_queue.extend(job_queue)
-        self.job_count += len(job_queue)
+    def _dequeue3(self, account):
+        self.job_queue.append(account.copy())
+        self.job_count += 1
         self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
     def _dequeueErr(self, error):
@@ -181,16 +176,19 @@ class WorkerServer(BaseServer):
         return d
     
     def _getAccount(self, account, uuid):
-        if not len(account)==2:
-            account = None
-        else:
+        if len(account)==2:
             account = account[1]
+        else:
+            account = None
         if not account:
+            LOGGER.debug('Could not find uuid in memcached: %s' % uuid)
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
             d.addCallback(self._getAccountMySQL, uuid)
             d.addErrback(self._dequeueErr)
+            return d
         else:
+            LOGGER.debug('Found uuid in memcached: %s' % uuid)
             return pickle.loads(account)
     
     def _getAccountMySQL(self, spider_info, uuid):
