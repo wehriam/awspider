@@ -176,10 +176,7 @@ class WorkerServer(BaseServer):
         return d
     
     def _getAccount(self, account, uuid):
-        if len(account)==2:
-            account = account[1]
-        else:
-            account = None
+        account = account[1]
         if not account:
             LOGGER.debug('Could not find uuid in memcached: %s' % uuid)
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
