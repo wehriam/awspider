@@ -2,6 +2,7 @@ from .base import BaseServer, LOGGER
 from ..resources2 import WorkerResource
 from ..networkaddress import getNetworkAddress
 from ..amqp import amqp as AMQP
+from ..resources import InterfaceResource, ExposedResource
 from MySQLdb.cursors import DictCursor
 from twisted.internet import reactor, protocol
 from twisted.enterprise import adbapi
@@ -71,7 +72,6 @@ class WorkerServer(BaseServer):
             reactor, MemCacheProtocol)
         # Resource Mappings
         self.resource_mapping = resource_mapping
-        LOGGER.debug('Resources: %s' % repr(resource_mapping))
         # HTTP interface
         resource = WorkerResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
@@ -145,7 +145,12 @@ class WorkerServer(BaseServer):
         # Closing the connection
     
     def dequeue(self):
-        deferToThread(self._dequeue)
+        if self.job_count < 1000:
+            LOGGER.info('Filling Job Queue, currently have %d jobs' % self.job_count)
+            deferToThread(self._dequeue)
+        else:
+            LOGGER.info('Local queue is full, retrying later.')
+            self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
     def _dequeue(self):
         msgs = self.queue.get()
@@ -160,8 +165,14 @@ class WorkerServer(BaseServer):
         d.addCallback(self._dequeue3)
         d.addErrback(self._dequeueErr)
     
-    def _dequeue3(self, account):
-        self.job_queue.append(account.copy())
+    def _dequeue3(self, job):
+        # Load custom function.
+        if job['function_name'] in self.functions:
+            job['exposed_function'] = self.functions[job['function_name']]
+        else:
+            LOGGER.error("Could not find function %s." % function_name)
+        LOGGER.debug(job)
+        self.job_queue.append(job.copy())
         self.job_count += 1
         self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
@@ -189,29 +200,35 @@ class WorkerServer(BaseServer):
             return pickle.loads(account)
     
     def _getAccountMySQL(self, spider_info, uuid):
-        account_type = spider_info[0]['type'].split('/')[0]
-        sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
-        d = self.mysql.runQuery(sql)
-        d.addCallback(self._getAccountMySQL2, spider_info, uuid)
-        d.addErrback(self._dequeueErr)
-        return d
+        try:
+            account_type = spider_info[0]['type'].split('/')[0]
+            sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
+            d = self.mysql.runQuery(sql)
+            d.addCallback(self._getAccountMySQL2, spider_info, uuid)
+            d.addErrback(self._dequeueErr)
+            return d
+        except:
+            LOGGER.error(spider_info)
+            raise
     
     def _getAccountMySQL2(self, account_info, spider_info, uuid):
+        job = {}
         account = account_info[0]
-        type = spider_info[0]['type']
-        if self.resource_mapping and self.resource_mapping.has_key(type):
-            LOGGER.info('Remapping resource %s to %s' % (type, self.resource_mapping[type]))
-            account['type'] = self.resource_mapping[type]
-        account['type'] = type
-        account['uuid'] = uuid
+        function_name = spider_info[0]['type']
+        if self.resource_mapping and self.resource_mapping.has_key(function_name):
+            LOGGER.info('Remapping resource %s to %s' % (function_name, self.resource_mapping[function_name]))
+            function_name = self.resource_mapping[function_name]
+        job['function_name'] = function_name
+        job['uuid'] = uuid
+        job['kwargs'] = account
         # Save account info in memcached for up to 7 days
-        d = self.memc.set(uuid, pickle.dumps(account), 60*60*24*7)
-        d.addCallback(self._getAccountMySQL3, account)
+        d = self.memc.set(uuid, pickle.dumps(job), 60*60*24*7)
+        d.addCallback(self._getAccountMySQL3, job)
         d.addErrback(self._dequeueErr)
         return d
     
-    def _getAccountMySQL3(self, memc, account):
-        return account
+    def _getAccountMySQL3(self, memc, job):
+        return job
     
     def getNetworkAddress(self):
         d = getNetworkAddress()
