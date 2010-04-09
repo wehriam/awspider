@@ -44,7 +44,7 @@ class WorkerServer(BaseServer):
             memcached_host=None,
             resource_mapping=None,
             amqp_port=5672,
-            amqp_prefetch_size=0,
+            amqp_prefetch_count=1000,
             mysql_port=3306,
             memcached_port=11211,
             max_simultaneous_requests=100,
@@ -84,7 +84,7 @@ class WorkerServer(BaseServer):
         self.amqp_password = amqp_password
         self.amqp_queue = amqp_queue
         self.amqp_exchange = amqp_exchange
-        self.amqp_prefetch_size = amqp_prefetch_size
+        self.amqp_prefetch_count = amqp_prefetch_count
         BaseServer.__init__(
             self,
             aws_access_key_id=aws_access_key_id,
@@ -117,7 +117,7 @@ class WorkerServer(BaseServer):
             self.amqp_password)
         self.chan = yield self.conn.channel(1)
         yield self.chan.channel_open()
-        yield self.chan.basic_qos(prefetch_size=self.amqp_prefetch_size)
+        yield self.chan.basic_qos(prefetch_count=self.amqp_prefetch_count)
         # Create Queue
         yield self.chan.queue_declare(
             queue=self.amqp_queue,
@@ -127,12 +127,13 @@ class WorkerServer(BaseServer):
         yield self.chan.queue_bind(
             queue=self.amqp_queue,
             exchange=self.amqp_exchange)
-        # yield self.chan.basic_consume(queue=self.amqp_queue,
-        #     no_ack=False,
-        #     consumer_tag="awspider_consumer")
-        # self.queue = yield self.conn.queue("awspider_consumer")
+        d = self.chan.basic_consume(queue=self.amqp_queue,
+            no_ack=False,
+            consumer_tag="awspider_consumer")
+        d.addCallback(self.dequeue)
+        self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
-        self.dequeue()
+        # self.dequeue()
     
     @inlineCallbacks
     def shutdown(self):
@@ -147,15 +148,11 @@ class WorkerServer(BaseServer):
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
     
-    def dequeue(self):
-        if self.job_count < 1000:
-            deferToThread(self._dequeue)
-        else:
-            LOGGER.info('Local queue is full, retrying later.')
-            self.dequeueCallLater = reactor.callLater(1, self.dequeue)
+    def dequeue(self, consumer=None):
+        deferToThread(self._dequeue)
     
     def _dequeue(self):
-        d = self.chan.basic_get(queue=self.amqp_queue, no_ack=True)
+        d = self.queue.get()
         d.addCallback(self._dequeue2)
         d.addErrback(self._dequeueErr)
     
