@@ -127,41 +127,42 @@ class WorkerServer(BaseServer):
         yield self.chan.queue_bind(
             queue=self.amqp_queue,
             exchange=self.amqp_exchange)
-        yield self.chan.basic_consume(queue=self.amqp_queue,
-            no_ack=True,
-            consumer_tag="awspider_consumer")
-        self.queue = yield self.conn.queue("awspider_consumer")
+        # yield self.chan.basic_consume(queue=self.amqp_queue,
+        #     no_ack=False,
+        #     consumer_tag="awspider_consumer")
+        # self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
         self.dequeue()
     
     @inlineCallbacks
     def shutdown(self):
+        LOGGER.debug("Closting connection")
         try:
             self.doSomethingCallLater.cancel()
         except:
             pass
-        LOGGER.debug("Closting connection")
-        yield None # You've got to yield something.
-        # Closing the connection
+        # Shut things down
+        LOGGER.info('Closing broker connection')
+        yield self.chan.channel_close()
+        chan0 = yield self.conn.channel(0)
+        yield chan0.connection_close()
     
     def dequeue(self):
         if self.job_count < 1000:
-            LOGGER.info('Filling Job Queue, currently have %d jobs' % self.job_count)
             deferToThread(self._dequeue)
         else:
             LOGGER.info('Local queue is full, retrying later.')
             self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
     def _dequeue(self):
-        msgs = self.queue.get()
-        d = self.queue.get()
+        d = self.chan.basic_get(queue=self.amqp_queue, no_ack=True)
         d.addCallback(self._dequeue2)
         d.addErrback(self._dequeueErr)
     
     def _dequeue2(self, msg):
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
-        d = self.getAccount(uuid)
+        d = self.getJob(uuid)
         d.addCallback(self._dequeue3)
         d.addErrback(self._dequeueErr)
     
@@ -174,21 +175,22 @@ class WorkerServer(BaseServer):
         LOGGER.debug(job)
         self.job_queue.append(job.copy())
         self.job_count += 1
+        LOGGER.info('Pulled job off of AMQP queue and adding it to the local queue(%d)' % self.job_count)
         self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
     def _dequeueErr(self, error):
         LOGGER.error(error)
         raise
     
-    def getAccount(self, uuid):
+    def getJob(self, uuid):
         d = self.memc.get(uuid)
-        d.addCallback(self._getAccount, uuid)
+        d.addCallback(self._getJob, uuid)
         d.addErrback(self._dequeueErr)
         return d
     
-    def _getAccount(self, account, uuid):
-        account = account[1]
-        if not account:
+    def _getJob(self, account, uuid):
+        job = account[1]
+        if not job:
             LOGGER.debug('Could not find uuid in memcached: %s' % uuid)
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
@@ -197,21 +199,21 @@ class WorkerServer(BaseServer):
             return d
         else:
             LOGGER.debug('Found uuid in memcached: %s' % uuid)
-            return pickle.loads(account)
+            return pickle.loads(job)
     
     def _getAccountMySQL(self, spider_info, uuid):
         try:
             account_type = spider_info[0]['type'].split('/')[0]
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
             d = self.mysql.runQuery(sql)
-            d.addCallback(self._getAccountMySQL2, spider_info, uuid)
+            d.addCallback(self.createJob, spider_info, uuid)
             d.addErrback(self._dequeueErr)
             return d
         except:
             LOGGER.error(spider_info)
             raise
     
-    def _getAccountMySQL2(self, account_info, spider_info, uuid):
+    def createJob(self, account_info, spider_info, uuid):
         job = {}
         account = account_info[0]
         function_name = spider_info[0]['type']
@@ -223,11 +225,11 @@ class WorkerServer(BaseServer):
         job['kwargs'] = account
         # Save account info in memcached for up to 7 days
         d = self.memc.set(uuid, pickle.dumps(job), 60*60*24*7)
-        d.addCallback(self._getAccountMySQL3, job)
+        d.addCallback(self._createJob, job)
         d.addErrback(self._dequeueErr)
         return d
     
-    def _getAccountMySQL3(self, memc, job):
+    def _createJob(self, memc, job):
         return job
     
     def getNetworkAddress(self):

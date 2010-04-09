@@ -131,6 +131,7 @@ class SchedulerServer(BaseServer):
     
     @inlineCallbacks
     def shutdown(self):
+        LOGGER.debug("Closting connection")
         try:
             self.enqueueCallLater.cancel()
         except:
