@@ -21,8 +21,8 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    job_queue = []
-    job_count = 0
+    # job_queue = []
+    # job_count = 0
     simultaneous_jobs = 50
     doSomethingCallLater = None
     
@@ -44,7 +44,7 @@ class WorkerServer(BaseServer):
             memcached_host=None,
             resource_mapping=None,
             amqp_port=5672,
-            amqp_prefetch_count=1000,
+            amqp_prefetch_count=100,
             mysql_port=3306,
             memcached_port=11211,
             max_simultaneous_requests=100,
@@ -133,7 +133,6 @@ class WorkerServer(BaseServer):
         d.addCallback(self.dequeue)
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
-        # self.dequeue()
     
     @inlineCallbacks
     def shutdown(self):
@@ -157,22 +156,29 @@ class WorkerServer(BaseServer):
         d.addErrback(self._dequeueErr)
     
     def _dequeue2(self, msg):
-        # Get the hex version of the UUID from byte string we were sent
-        uuid = UUID(bytes=msg.content.body).hex
-        d = self.getJob(uuid)
-        d.addCallback(self._dequeue3)
-        d.addErrback(self._dequeueErr)
+        LOGGER.debug(msg)
+        if msg:
+            # Get the hex version of the UUID from byte string we were sent
+            uuid = UUID(bytes=msg.content.body).hex
+            d = self.getJob(uuid)
+            d.addCallback(self._dequeue3, msg)
+            d.addErrback(self._dequeueErr)
     
-    def _dequeue3(self, job):
+    def _dequeue3(self, job, msg):
         # Load custom function.
         if job['function_name'] in self.functions:
             job['exposed_function'] = self.functions[job['function_name']]
         else:
             LOGGER.error("Could not find function %s." % function_name)
+        # self.job_queue.append(job.copy())
+        # self.job_count += 1
+        LOGGER.info('Pulled job off of AMQP queue')
+        d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
+        d.addCallback(self.executeJob, job)
+        d.addErrback(self._dequeueErr)
+
+    def executeJob(self, ack, job):
         LOGGER.debug(job)
-        self.job_queue.append(job.copy())
-        self.job_count += 1
-        LOGGER.info('Pulled job off of AMQP queue and adding it to the local queue(%d)' % self.job_count)
         self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
     def _dequeueErr(self, error):
