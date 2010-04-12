@@ -21,8 +21,6 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    # job_queue = []
-    # job_count = 0
     simultaneous_jobs = 50
     doSomethingCallLater = None
     
@@ -148,7 +146,10 @@ class WorkerServer(BaseServer):
         yield chan0.connection_close()
     
     def dequeue(self, consumer=None):
-        deferToThread(self._dequeue)
+        if len(self.active_jobs) < self.simultaneous_jobs:
+            deferToThread(self._dequeue)
+        else:
+            LOGGER.info('Maximum simultaneous jobs running (%d/%d)' % (self.active_jobs, self.simultaneous_jobs))
     
     def _dequeue(self):
         d = self.queue.get()
@@ -156,7 +157,6 @@ class WorkerServer(BaseServer):
         d.addErrback(self._dequeueErr)
     
     def _dequeue2(self, msg):
-        LOGGER.debug(msg)
         if msg:
             # Get the hex version of the UUID from byte string we were sent
             uuid = UUID(bytes=msg.content.body).hex
@@ -165,22 +165,37 @@ class WorkerServer(BaseServer):
             d.addErrback(self._dequeueErr)
     
     def _dequeue3(self, job, msg):
+        import pdb
+        LOGGER.critical(job)
+        LOGGER.critical(msg.delivery_tag)
         # Load custom function.
         if job['function_name'] in self.functions:
             job['exposed_function'] = self.functions[job['function_name']]
         else:
-            LOGGER.error("Could not find function %s." % function_name)
-        # self.job_queue.append(job.copy())
-        # self.job_count += 1
+            LOGGER.error("Could not find function %s." % job['function_name'])
         LOGGER.info('Pulled job off of AMQP queue')
+        # pdb.set_trace()
         d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
         d.addCallback(self.executeJob, job)
         d.addErrback(self._dequeueErr)
-
-    def executeJob(self, ack, job):
-        LOGGER.debug(job)
-        self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
+    def executeJob(self, ack, job):
+        exposed_function = job["exposed_function"]
+        kwargs = job["kwargs"]
+        function_name = job["function_name"]
+        uuid = job["uuid"]
+        d = self.callExposedFunction(
+            exposed_function["function"], 
+            kwargs, 
+            function_name, 
+            uuid=uuid)
+        d.addCallback(self._executeJob)
+        d.addErrback(self._dequeueErr)
+        self.dequeueCallLater = reactor.callLater(1, self.dequeue)
+        
+    def _executeJob(self, data):
+        LOGGER.debug(data)
+        
     def _dequeueErr(self, error):
         LOGGER.error(error)
         raise
@@ -224,6 +239,7 @@ class WorkerServer(BaseServer):
             LOGGER.info('Remapping resource %s to %s' % (function_name, self.resource_mapping[function_name]))
             function_name = self.resource_mapping[function_name]
         job['function_name'] = function_name
+        job['reservation_cache'] = None
         job['uuid'] = uuid
         job['kwargs'] = account
         # Save account info in memcached for up to 7 days
