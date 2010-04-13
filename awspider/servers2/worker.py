@@ -165,19 +165,19 @@ class WorkerServer(BaseServer):
             d.addErrback(self._dequeueErr)
     
     def _dequeue3(self, job, msg):
-        import pdb
-        LOGGER.critical(job)
-        LOGGER.critical(msg.delivery_tag)
-        # Load custom function.
-        if job['function_name'] in self.functions:
-            job['exposed_function'] = self.functions[job['function_name']]
+        if job:
+            # Load custom function.
+            if job['function_name'] in self.functions:
+                job['exposed_function'] = self.functions[job['function_name']]
+            else:
+                LOGGER.error("Could not find function %s." % job['function_name'])
+            LOGGER.info('Pulled job off of AMQP queue')
+            job['kwargs'] = self.mapKwargs(job)
+            d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
+            d.addCallback(self.executeJob, job)
+            d.addErrback(self._dequeueErr)
         else:
-            LOGGER.error("Could not find function %s." % job['function_name'])
-        LOGGER.info('Pulled job off of AMQP queue')
-        # pdb.set_trace()
-        d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
-        d.addCallback(self.executeJob, job)
-        d.addErrback(self._dequeueErr)
+            self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
     def executeJob(self, ack, job):
         exposed_function = job["exposed_function"]
@@ -191,10 +191,9 @@ class WorkerServer(BaseServer):
             uuid=uuid)
         d.addCallback(self._executeJob)
         d.addErrback(self._dequeueErr)
-        self.dequeueCallLater = reactor.callLater(1, self.dequeue)
         
     def _executeJob(self, data):
-        LOGGER.debug(data)
+        self.dequeueCallLater = reactor.callLater(1, self.dequeue)
         
     def _dequeueErr(self, error):
         LOGGER.error(error)
@@ -220,16 +219,20 @@ class WorkerServer(BaseServer):
             return pickle.loads(job)
     
     def _getAccountMySQL(self, spider_info, uuid):
-        try:
-            account_type = spider_info[0]['type'].split('/')[0]
-            sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
-            d = self.mysql.runQuery(sql)
-            d.addCallback(self.createJob, spider_info, uuid)
-            d.addErrback(self._dequeueErr)
-            return d
-        except:
-            LOGGER.error(spider_info)
-            raise
+        if spider_info:
+            try:
+                LOGGER.debug(spider_info[0]['type'])
+                account_type = spider_info[0]['type'].split('/')[0]
+                sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
+                d = self.mysql.runQuery(sql)
+                d.addCallback(self.createJob, spider_info, uuid)
+                d.addErrback(self._dequeueErr)
+                return d
+            except:
+                LOGGER.error(spider_info)
+                raise
+        LOGGER.critical('No spider_info given for uuid %s' % uuid)
+        return None
     
     def createJob(self, account_info, spider_info, uuid):
         job = {}
@@ -241,7 +244,7 @@ class WorkerServer(BaseServer):
         job['function_name'] = function_name
         job['reservation_cache'] = None
         job['uuid'] = uuid
-        job['kwargs'] = account
+        job['account'] = account
         # Save account info in memcached for up to 7 days
         d = self.memc.set(uuid, pickle.dumps(job), 60*60*24*7)
         d.addCallback(self._createJob, job)
@@ -250,6 +253,31 @@ class WorkerServer(BaseServer):
     
     def _createJob(self, memc, job):
         return job
+        
+    def mapKwargs(self, job):
+        kwargs = {}
+        service_name = job['function_name'].split('/')[0]
+        # remap some basic fields that differ from the plugin and the database
+        LOGGER.debug(job['account'])
+        LOGGER.debug(job['exposed_function']['required_arguments'])
+        LOGGER.debug(job['exposed_function']['optional_arguments'])
+        if ('%s_user_id' % service_name) in job['account']:
+            job['account']['user_id'] = job['account']['%s_user_id' % service_name]
+            job['account']['username'] = job['account']['%s_user_id' % service_name]
+        if 'session_key' in job['account']:
+            job['account']['sk'] = job['account']['session_key']
+        if 'secret' in job['account']:
+            job['account']['token_secret'] = job['account']['secret']
+        if 'key' in job['account']:
+            job['account']['token_key'] = job['account']['key']
+        for arg in job['exposed_function']['required_arguments']:
+            if arg in job['account']:
+                kwargs[arg] = job['account'][arg]
+        for arg in job['exposed_function']['optional_arguments']:
+            if arg in job['account']:
+                kwargs[arg] = job['account'][arg]
+        LOGGER.debug('Mapping required and optional kwargs: %s' % repr(kwargs))
+        return kwargs
     
     def getNetworkAddress(self):
         d = getNetworkAddress()

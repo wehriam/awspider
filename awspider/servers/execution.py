@@ -561,7 +561,6 @@ class ExecutionServer(BaseServer):
     def executeJobs(self, data=None):           
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
             job = self.job_queue.pop(0)
-            LOGGER.critical(job)
             exposed_function = job["exposed_function"]
             kwargs = job["kwargs"]
             function_name = job["function_name"]
