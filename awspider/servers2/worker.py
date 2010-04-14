@@ -10,7 +10,7 @@ from twisted.web import server
 from twisted.protocols.memcache import MemCacheProtocol, DEFAULT_PORT
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred, inlineCallbacks
 from twisted.internet.threads import deferToThread
-from uuid import UUID
+from uuid import UUID, uuid4
 import pprint
 import cPickle as pickle
 
@@ -154,7 +154,7 @@ class WorkerServer(BaseServer):
     def _dequeue(self):
         d = self.queue.get()
         d.addCallback(self._dequeue2)
-        d.addErrback(self._dequeueErr)
+        d.addErrback(self.workerError)
     
     def _dequeue2(self, msg):
         if msg:
@@ -162,7 +162,7 @@ class WorkerServer(BaseServer):
             uuid = UUID(bytes=msg.content.body).hex
             d = self.getJob(uuid)
             d.addCallback(self._dequeue3, msg)
-            d.addErrback(self._dequeueErr)
+            d.addErrback(self.workerError)
     
     def _dequeue3(self, job, msg):
         if job:
@@ -175,7 +175,7 @@ class WorkerServer(BaseServer):
             job['kwargs'] = self.mapKwargs(job)
             d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
             d.addCallback(self.executeJob, job)
-            d.addErrback(self._dequeueErr)
+            d.addErrback(self.workerError)
         else:
             self.dequeueCallLater = reactor.callLater(1, self.dequeue)
     
@@ -190,19 +190,19 @@ class WorkerServer(BaseServer):
             function_name, 
             uuid=uuid)
         d.addCallback(self._executeJob)
-        d.addErrback(self._dequeueErr)
+        d.addErrback(self.workerError)
         
     def _executeJob(self, data):
         self.dequeueCallLater = reactor.callLater(1, self.dequeue)
         
-    def _dequeueErr(self, error):
+    def workerError(self, error):
         LOGGER.error(error)
-        raise
+        raise error
     
     def getJob(self, uuid):
         d = self.memc.get(uuid)
         d.addCallback(self._getJob, uuid)
-        d.addErrback(self._dequeueErr)
+        d.addErrback(self.workerError)
         return d
     
     def _getJob(self, account, uuid):
@@ -212,7 +212,7 @@ class WorkerServer(BaseServer):
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
             d.addCallback(self._getAccountMySQL, uuid)
-            d.addErrback(self._dequeueErr)
+            d.addErrback(self.workerError)
             return d
         else:
             LOGGER.debug('Found uuid in memcached: %s' % uuid)
@@ -226,7 +226,7 @@ class WorkerServer(BaseServer):
                 sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
                 d = self.mysql.runQuery(sql)
                 d.addCallback(self.createJob, spider_info, uuid)
-                d.addErrback(self._dequeueErr)
+                d.addErrback(self.workerError)
                 return d
             except:
                 LOGGER.error(spider_info)
@@ -248,7 +248,7 @@ class WorkerServer(BaseServer):
         # Save account info in memcached for up to 7 days
         d = self.memc.set(uuid, pickle.dumps(job), 60*60*24*7)
         d.addCallback(self._createJob, job)
-        d.addErrback(self._dequeueErr)
+        d.addErrback(self.workerError)
         return d
     
     def _createJob(self, memc, job):
@@ -258,9 +258,6 @@ class WorkerServer(BaseServer):
         kwargs = {}
         service_name = job['function_name'].split('/')[0]
         # remap some basic fields that differ from the plugin and the database
-        LOGGER.debug(job['account'])
-        LOGGER.debug(job['exposed_function']['required_arguments'])
-        LOGGER.debug(job['exposed_function']['optional_arguments'])
         if ('%s_user_id' % service_name) in job['account']:
             job['account']['user_id'] = job['account']['%s_user_id' % service_name]
             job['account']['username'] = job['account']['%s_user_id' % service_name]
@@ -276,9 +273,33 @@ class WorkerServer(BaseServer):
         for arg in job['exposed_function']['optional_arguments']:
             if arg in job['account']:
                 kwargs[arg] = job['account'][arg]
-        LOGGER.debug('Mapping required and optional kwargs: %s' % repr(kwargs))
         return kwargs
-    
+        
+    def createReservation(self, function_name, **kwargs):
+        uuid = uuid4().hex
+        if not isinstance(function_name, str):
+            for key in self.functions:
+                if self.functions[key]["function"] == function_name:
+                    function_name = key
+                    break
+        if function_name not in self.functions:
+            raise Exception("Function %s does not exist." % function_name)
+        d = self.callExposedFunction(
+            self.functions[function_name]["function"], 
+            kwargs, 
+            function_name, 
+            uuid=uuid)
+        d.addCallback(self._createReservationCallback, function_name, uuid)
+        d.addErrback(self._createReservationErrback, function_name, uuid)
+        return d
+        
+    def _createReservationCallback(self, data, function_name, uuid):
+        return data
+            
+    def _createReservationErrback(self, error, function_name, uuid):
+        LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
+        return error
+        
     def getNetworkAddress(self):
         d = getNetworkAddress()
         d.addCallback(self._getNetworkAddressCallback)
