@@ -197,7 +197,7 @@ class WorkerServer(BaseServer):
         
     def workerError(self, error):
         LOGGER.error(error)
-        raise error
+        # raise error
     
     def getJob(self, uuid):
         d = self.memc.get(uuid)
@@ -298,7 +298,7 @@ class WorkerServer(BaseServer):
             
     def _createReservationErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
-        return error
+        # return error
         
     def getNetworkAddress(self):
         d = getNetworkAddress()
