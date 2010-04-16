@@ -4,7 +4,7 @@ from ..networkaddress import getNetworkAddress
 from ..amqp import amqp as AMQP
 from ..resources import InterfaceResource, ExposedResource
 from MySQLdb.cursors import DictCursor
-from twisted.internet import reactor, protocol
+from twisted.internet import reactor, protocol, task
 from twisted.enterprise import adbapi
 from twisted.web import server
 from twisted.protocols.memcache import MemCacheProtocol, DEFAULT_PORT
@@ -24,6 +24,8 @@ class WorkerServer(BaseServer):
     simultaneous_jobs = 100
     doSomethingCallLater = None
     jobs_complete = 0
+    job_queue = []
+    job_queue_a = job_queue.append
     
     def __init__(self,
             aws_access_key_id,
@@ -43,7 +45,7 @@ class WorkerServer(BaseServer):
             memcached_host=None,
             resource_mapping=None,
             amqp_port=5672,
-            amqp_prefetch_count=100,
+            amqp_prefetch_count=1000,
             mysql_port=3306,
             memcached_port=11211,
             max_simultaneous_requests=100,
@@ -132,6 +134,8 @@ class WorkerServer(BaseServer):
         d.addCallback(self.dequeue)
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
+        self.jobsloop = task.LoopingCall(self.executeJobs)
+        self.jobsloop.start(1)
     
     @inlineCallbacks
     def shutdown(self):
@@ -145,12 +149,9 @@ class WorkerServer(BaseServer):
         yield self.chan.channel_close()
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
-    
+        
     def dequeue(self, consumer=None):
-        if len(self.active_jobs) < self.simultaneous_jobs:
-            deferToThread(self._dequeue)
-        else:
-            LOGGER.info('Maximum simultaneous jobs running (%d/%d)' % (self.active_jobs, self.simultaneous_jobs))
+        deferToThread(self._dequeue)
     
     def _dequeue(self):
         d = self.queue.get()
@@ -175,28 +176,27 @@ class WorkerServer(BaseServer):
             LOGGER.info('Pulled job off of AMQP queue')
             job['kwargs'] = self.mapKwargs(job)
             d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
-            d.addCallback(self.executeJob, job)
-            d.addErrback(self.workerError)
-        else:
-            self.dequeueCallLater = reactor.callLater(1, self.dequeue)
+            self.job_queue_a(job)
+        self.dequeueCallLater = reactor.callLater(1, self._dequeue)
     
-    def executeJob(self, ack, job):
-        exposed_function = job["exposed_function"]
-        kwargs = job["kwargs"]
-        function_name = job["function_name"]
-        uuid = job["uuid"]
-        d = self.callExposedFunction(
-            exposed_function["function"], 
-            kwargs, 
-            function_name, 
-            uuid=uuid)
-        d.addCallback(self._executeJob)
-        d.addErrback(self.workerError)
+    def executeJobs(self):
+        while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
+            job = self.job_queue.pop(0)
+            exposed_function = job["exposed_function"]
+            kwargs = job["kwargs"]
+            function_name = job["function_name"]
+            uuid = job["uuid"]
+            d = self.callExposedFunction(
+                exposed_function["function"], 
+                kwargs, 
+                function_name, 
+                uuid=uuid)
+            d.addCallback(self._executeJob2)
+            d.addErrback(self.workerError)
         
-    def _executeJob(self, data):
+    def _executeJob2(self, data):
         self.jobs_complete += 1
         LOGGER.info('Completed %d jobs' % self.jobs_complete)
-        self.dequeueCallLater = reactor.callLater(1, self.dequeue)
         
     def workerError(self, error):
         LOGGER.error('Worker Error: %s' % str(error))
@@ -222,7 +222,6 @@ class WorkerServer(BaseServer):
     
     def _getAccountMySQL(self, spider_info, uuid):
         if spider_info:
-            LOGGER.debug(spider_info[0]['type'])
             account_type = spider_info[0]['type'].split('/')[0]
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
             d = self.mysql.runQuery(sql)
