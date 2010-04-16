@@ -21,8 +21,9 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    simultaneous_jobs = 50
+    simultaneous_jobs = 100
     doSomethingCallLater = None
+    jobs_complete = 0
     
     def __init__(self,
             aws_access_key_id,
@@ -193,11 +194,12 @@ class WorkerServer(BaseServer):
         d.addErrback(self.workerError)
         
     def _executeJob(self, data):
+        self.jobs_complete += 1
+        LOGGER.info('Completed %d jobs' % self.jobs_complete)
         self.dequeueCallLater = reactor.callLater(1, self.dequeue)
         
     def workerError(self, error):
-        LOGGER.error(error)
-        # raise error
+        LOGGER.error('Worker Error: %s' % str(error))
     
     def getJob(self, uuid):
         d = self.memc.get(uuid)
@@ -220,17 +222,13 @@ class WorkerServer(BaseServer):
     
     def _getAccountMySQL(self, spider_info, uuid):
         if spider_info:
-            try:
-                LOGGER.debug(spider_info[0]['type'])
-                account_type = spider_info[0]['type'].split('/')[0]
-                sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
-                d = self.mysql.runQuery(sql)
-                d.addCallback(self.createJob, spider_info, uuid)
-                d.addErrback(self.workerError)
-                return d
-            except:
-                LOGGER.error(spider_info)
-                raise
+            LOGGER.debug(spider_info[0]['type'])
+            account_type = spider_info[0]['type'].split('/')[0]
+            sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
+            d = self.mysql.runQuery(sql)
+            d.addCallback(self.createJob, spider_info, uuid)
+            d.addErrback(self.workerError)
+            return d
         LOGGER.critical('No spider_info given for uuid %s' % uuid)
         return None
     
@@ -298,7 +296,7 @@ class WorkerServer(BaseServer):
             
     def _createReservationErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
-        # return error
+        return {}
         
     def getNetworkAddress(self):
         d = getNetworkAddress()
