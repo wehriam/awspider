@@ -151,20 +151,23 @@ class WorkerServer(BaseServer):
         yield chan0.connection_close()
         
     def dequeue(self, consumer=None):
+        LOGGER.info('Starting Dequeuing Thread...')
         deferToThread(self._dequeue)
     
     def _dequeue(self):
-        d = self.queue.get()
-        d.addCallback(self._dequeue2)
-        d.addErrback(self.workerError)
+        if len(self.active_jobs) <= self.amqp_prefetch_count:
+            d = self.queue.get()
+            d.addCallback(self._dequeue2)
+            d.addErrback(self.workerError)
+        else:
+            reactor.callLater(1, self._dequeue)
     
     def _dequeue2(self, msg):
-        if msg:
-            # Get the hex version of the UUID from byte string we were sent
-            uuid = UUID(bytes=msg.content.body).hex
-            d = self.getJob(uuid)
-            d.addCallback(self._dequeue3, msg)
-            d.addErrback(self.workerError)
+        # Get the hex version of the UUID from byte string we were sent
+        uuid = UUID(bytes=msg.content.body).hex
+        d = self.getJob(uuid, msg.delivery_tag)
+        d.addCallback(self._dequeue3, msg)
+        d.addErrback(self.workerError)
     
     def _dequeue3(self, job, msg):
         if job:
@@ -175,9 +178,9 @@ class WorkerServer(BaseServer):
                 LOGGER.error("Could not find function %s." % job['function_name'])
             LOGGER.info('Pulled job off of AMQP queue')
             job['kwargs'] = self.mapKwargs(job)
-            d = self.chan.basic_ack(delivery_tag=msg.delivery_tag)
+            job['delivery_tag'] = msg.delivery_tag
             self.job_queue_a(job)
-        self.dequeueCallLater = reactor.callLater(1, self._dequeue)
+        self._dequeue()
     
     def executeJobs(self):
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
@@ -191,36 +194,37 @@ class WorkerServer(BaseServer):
                 kwargs, 
                 function_name, 
                 uuid=uuid)
-            d.addCallback(self._executeJob2)
+            d.addCallback(self._executeJob2, job)
             d.addErrback(self.workerError)
         
-    def _executeJob2(self, data):
+    def _executeJob2(self, data, job):
+        self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         self.jobs_complete += 1
         LOGGER.info('Completed %d jobs' % self.jobs_complete)
         
     def workerError(self, error):
         LOGGER.error('Worker Error: %s' % str(error))
     
-    def getJob(self, uuid):
+    def getJob(self, uuid, delivery_tag):
         d = self.memc.get(uuid)
-        d.addCallback(self._getJob, uuid)
+        d.addCallback(self._getJob, uuid, delivery_tag)
         d.addErrback(self.workerError)
         return d
     
-    def _getJob(self, account, uuid):
+    def _getJob(self, account, uuid, delivery_tag):
         job = account[1]
         if not job:
             LOGGER.debug('Could not find uuid in memcached: %s' % uuid)
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
-            d.addCallback(self._getAccountMySQL, uuid)
+            d.addCallback(self._getAccountMySQL, uuid, delivery_tag)
             d.addErrback(self.workerError)
             return d
         else:
             LOGGER.debug('Found uuid in memcached: %s' % uuid)
             return pickle.loads(job)
     
-    def _getAccountMySQL(self, spider_info, uuid):
+    def _getAccountMySQL(self, spider_info, uuid, delivery_tag):
         if spider_info:
             account_type = spider_info[0]['type'].split('/')[0]
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
@@ -229,6 +233,7 @@ class WorkerServer(BaseServer):
             d.addErrback(self.workerError)
             return d
         LOGGER.critical('No spider_info given for uuid %s' % uuid)
+        self.chan.basic_ack(delivery_tag=delivery_tag)
         return None
     
     def createJob(self, account_info, spider_info, uuid):
