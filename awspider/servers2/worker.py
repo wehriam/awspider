@@ -12,7 +12,7 @@ from twisted.internet.defer import Deferred, DeferredList, maybeDeferred, inline
 from twisted.internet.threads import deferToThread
 from uuid import UUID, uuid4
 import pprint
-import cPickle as pickle
+import simplejson
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
@@ -157,19 +157,19 @@ class WorkerServer(BaseServer):
     def _dequeue(self):
         if len(self.active_jobs) <= self.amqp_prefetch_count:
             d = self.queue.get()
-            d.addCallback(self._dequeue2)
+            d.addCallback(self._dequeueCallback)
             d.addErrback(self.workerError)
         else:
             reactor.callLater(1, self._dequeue)
     
-    def _dequeue2(self, msg):
+    def _dequeueCallback(self, msg):
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
         d = self.getJob(uuid, msg.delivery_tag)
-        d.addCallback(self._dequeue3, msg)
+        d.addCallback(self._dequeueCallback2, msg)
         d.addErrback(self.workerError)
     
-    def _dequeue3(self, job, msg):
+    def _dequeueCallback2(self, job, msg):
         if job:
             # Load custom function.
             if job['function_name'] in self.functions:
@@ -194,10 +194,10 @@ class WorkerServer(BaseServer):
                 kwargs, 
                 function_name, 
                 uuid=uuid)
-            d.addCallback(self._executeJob2, job)
+            d.addCallback(self._executeJobCallback, job)
             d.addErrback(self.workerError)
         
-    def _executeJob2(self, data, job):
+    def _executeJobCallback(self, data, job):
         self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         self.jobs_complete += 1
         LOGGER.info('Completed %d jobs' % self.jobs_complete)
@@ -207,24 +207,24 @@ class WorkerServer(BaseServer):
     
     def getJob(self, uuid, delivery_tag):
         d = self.memc.get(uuid)
-        d.addCallback(self._getJob, uuid, delivery_tag)
+        d.addCallback(self._getJobCallback, uuid, delivery_tag)
         d.addErrback(self.workerError)
         return d
     
-    def _getJob(self, account, uuid, delivery_tag):
+    def _getJobCallback(self, account, uuid, delivery_tag):
         job = account[1]
         if not job:
             LOGGER.debug('Could not find uuid in memcached: %s' % uuid)
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
-            d.addCallback(self._getAccountMySQL, uuid, delivery_tag)
+            d.addCallback(self.getAccountMySQL, uuid, delivery_tag)
             d.addErrback(self.workerError)
             return d
         else:
             LOGGER.debug('Found uuid in memcached: %s' % uuid)
-            return pickle.loads(job)
+            return simplejson.loads(job)
     
-    def _getAccountMySQL(self, spider_info, uuid, delivery_tag):
+    def getAccountMySQL(self, spider_info, uuid, delivery_tag):
         if spider_info:
             account_type = spider_info[0]['type'].split('/')[0]
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
@@ -248,12 +248,12 @@ class WorkerServer(BaseServer):
         job['uuid'] = uuid
         job['account'] = account
         # Save account info in memcached for up to 7 days
-        d = self.memc.set(uuid, pickle.dumps(job), 60*60*24*7)
-        d.addCallback(self._createJob, job)
+        d = self.memc.set(uuid, simplejson.dumps(job), 60*60*24*7)
+        d.addCallback(self._createJobCallback, job)
         d.addErrback(self.workerError)
         return d
     
-    def _createJob(self, memc, job):
+    def _createJobCallback(self, memc, job):
         return job
         
     def mapKwargs(self, job):
