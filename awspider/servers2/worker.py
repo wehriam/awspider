@@ -43,7 +43,8 @@ class WorkerServer(BaseServer):
             amqp_queue=None,
             amqp_exchange=None,
             memcached_host=None,
-            resource_mapping=None,
+            service_mapping=None,
+            service_args_mapping=None,
             amqp_port=5672,
             amqp_prefetch_count=1000,
             mysql_port=3306,
@@ -72,7 +73,8 @@ class WorkerServer(BaseServer):
         self.memc_ClientCreator = protocol.ClientCreator(
             reactor, MemCacheProtocol)
         # Resource Mappings
-        self.resource_mapping = resource_mapping
+        self.service_mapping = service_mapping
+        self.service_args_mapping = service_args_mapping
         # HTTP interface
         resource = WorkerResource(self)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
@@ -240,9 +242,9 @@ class WorkerServer(BaseServer):
         job = {}
         account = account_info[0]
         function_name = spider_info[0]['type']
-        if self.resource_mapping and self.resource_mapping.has_key(function_name):
-            LOGGER.info('Remapping resource %s to %s' % (function_name, self.resource_mapping[function_name]))
-            function_name = self.resource_mapping[function_name]
+        if self.service_mapping and self.service_mapping.has_key(function_name):
+            LOGGER.info('Remapping resource %s to %s' % (function_name, self.service_mapping[function_name]))
+            function_name = self.service_mapping[function_name]
         job['function_name'] = function_name
         job['reservation_cache'] = None
         job['uuid'] = uuid
@@ -259,22 +261,27 @@ class WorkerServer(BaseServer):
     def mapKwargs(self, job):
         kwargs = {}
         service_name = job['function_name'].split('/')[0]
-        # remap some basic fields that differ from the plugin and the database
-        if ('%s_user_id' % service_name) in job['account']:
-            job['account']['user_id'] = job['account']['%s_user_id' % service_name]
-            job['account']['username'] = job['account']['%s_user_id' % service_name]
-        if 'session_key' in job['account']:
-            job['account']['sk'] = job['account']['session_key']
-        if 'secret' in job['account']:
-            job['account']['token_secret'] = job['account']['secret']
-        if 'key' in job['account']:
-            job['account']['token_key'] = job['account']['key']
+        # remap some fields that differ from the plugin and the database
+        if service_name in self.service_args_mapping:
+            for key in self.service_args_mapping[service_name]:
+                job['account']['%s' % self.service_args_mapping[service_name][key]] = job['account'][key]
+        # if ('%s_user_id' % service_name) in job['account']:
+        #     job['account']['user_id'] = job['account']['%s_user_id' % service_name]
+        #     job['account']['username'] = job['account']['%s_user_id' % service_name]
+        # if 'session_key' in job['account']:
+        #     job['account']['sk'] = job['account']['session_key']
+        # if 'secret' in job['account']:
+        #     job['account']['token_secret'] = job['account']['secret']
+        # if 'key' in job['account']:
+        #     job['account']['token_key'] = job['account']['key']
+        # apply job fields to req and optional kwargs
         for arg in job['exposed_function']['required_arguments']:
             if arg in job['account']:
                 kwargs[arg] = job['account'][arg]
         for arg in job['exposed_function']['optional_arguments']:
             if arg in job['account']:
                 kwargs[arg] = job['account'][arg]
+        LOGGER.critical(kwargs)
         return kwargs
         
     def createReservation(self, function_name, **kwargs):

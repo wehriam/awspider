@@ -36,7 +36,7 @@ class SchedulerServer(BaseServer):
             amqp_port=5672,
             mysql_port=3306,
             port=5004, 
-            resource_mapping=None,
+            service_mapping=None,
             log_file='schedulerserver.log',
             log_directory=None,
             log_level="debug"):
@@ -51,7 +51,7 @@ class SchedulerServer(BaseServer):
             cp_reconnect=True, 
             cursorclass=DictCursor)
         # Resource Mappings
-        self.resource_mapping = resource_mapping
+        self.service_mapping = service_mapping
         # AMQP connection parameters
         self.amqp_host = amqp_host
         self.amqp_vhost = amqp_vhost
@@ -178,11 +178,11 @@ class SchedulerServer(BaseServer):
         raise
         
     def addToHeap(self, uuid, type):
-        # lookup if type is in the resource_mapping, if it is
+        # lookup if type is in the service_mapping, if it is
         # then rewrite type to the proper resource
-        if self.resource_mapping and self.resource_mapping.has_key(type):
-            LOGGER.info('Remapping resource %s to %s' % (type, self.resource_mapping[type]))
-            type = self.resource_mapping[type]
+        if self.service_mapping and self.service_mapping.has_key(type):
+            LOGGER.info('Remapping resource %s to %s' % (type, self.service_mapping[type]))
+            type = self.service_mapping[type]
         uuid = UUID(uuid).bytes
         interval = 10 #int(self.functions[type]['interval'])
         try:
