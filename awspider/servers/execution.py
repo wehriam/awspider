@@ -471,7 +471,7 @@ class ExecutionServer(BaseServer):
         sql = re.sub(r"\s\s*", " ", sql);
         self.current_sql = sql
         LOGGER.debug("Querying SimpleDB, \"%s\"" % sql)
-        d = self.sdb.select(sql)
+        d = self.sdb.select(sql, max_results=5000)
         d.addCallback(self._queryCallback)
         d.addErrback(self._queryErrback)
 
