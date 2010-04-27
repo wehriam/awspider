@@ -48,7 +48,8 @@ class BaseServer(object):
                  max_simultaneous_requests_per_host=0,
                  log_file=None,
                  log_directory=None,
-                 log_level="debug"):
+                 log_level="debug",
+                 port=8080):
         self.start_deferred = Deferred()
         self.rq = RequestQueuer( 
             max_simultaneous_requests=int(max_simultaneous_requests), 
