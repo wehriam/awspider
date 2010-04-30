@@ -31,7 +31,7 @@ class ExecutionServer(BaseServer):
     job_queue = []
     job_count = 0
     query_start_time = None
-    simultaneous_jobs = 50
+    simultaneous_jobs = 30
     querying_for_jobs = False
     reservation_update_queue = []
     current_sql = ""
@@ -44,7 +44,7 @@ class ExecutionServer(BaseServer):
             aws_s3_storage_bucket=None,
             aws_sdb_coordination_domain=None,
             aws_s3_reservation_cache_bucket=None,
-            max_simultaneous_requests=100,
+            max_simultaneous_requests=50,
             max_requests_per_host_per_second=0,
             max_simultaneous_requests_per_host=0,
             port=5001, 
