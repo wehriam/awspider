@@ -1,12 +1,9 @@
-from ez_setup import use_setuptools
-use_setuptools()
-
 from setuptools import setup, find_packages
 # Also requires python-dev and python-openssl
 setup(
 
     name = "AWSpider",
-    version = "0.2.5.9",
+    version = "0.2.6.4",
 
     packages = find_packages(),
 
