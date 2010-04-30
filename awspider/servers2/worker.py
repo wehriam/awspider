@@ -284,31 +284,6 @@ class WorkerServer(BaseServer):
         LOGGER.critical(kwargs)
         return kwargs
         
-    def createReservation(self, function_name, **kwargs):
-        uuid = uuid4().hex
-        if not isinstance(function_name, str):
-            for key in self.functions:
-                if self.functions[key]["function"] == function_name:
-                    function_name = key
-                    break
-        if function_name not in self.functions:
-            raise Exception("Function %s does not exist." % function_name)
-        d = self.callExposedFunction(
-            self.functions[function_name]["function"], 
-            kwargs, 
-            function_name, 
-            uuid=uuid)
-        d.addCallback(self._createReservationCallback, function_name, uuid)
-        d.addErrback(self._createReservationErrback, function_name, uuid)
-        return d
-        
-    def _createReservationCallback(self, data, function_name, uuid):
-        return data
-            
-    def _createReservationErrback(self, error, function_name, uuid):
-        LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
-        return {}
-        
     def getNetworkAddress(self):
         d = getNetworkAddress()
         d.addCallback(self._getNetworkAddressCallback)
