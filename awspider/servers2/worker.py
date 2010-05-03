@@ -234,7 +234,7 @@ class WorkerServer(BaseServer):
             d.addCallback(self.createJob, spider_info, uuid)
             d.addErrback(self.workerError)
             return d
-        LOGGER.critical('No spider_info given for uuid %s' % uuid)
+        LOGGER.info('No spider_info given for uuid %s' % uuid)
         self.chan.basic_ack(delivery_tag=delivery_tag)
         return None
     
@@ -264,16 +264,8 @@ class WorkerServer(BaseServer):
         # remap some fields that differ from the plugin and the database
         if service_name in self.service_args_mapping:
             for key in self.service_args_mapping[service_name]:
-                job['account']['%s' % self.service_args_mapping[service_name][key]] = job['account'][key]
-        # if ('%s_user_id' % service_name) in job['account']:
-        #     job['account']['user_id'] = job['account']['%s_user_id' % service_name]
-        #     job['account']['username'] = job['account']['%s_user_id' % service_name]
-        # if 'session_key' in job['account']:
-        #     job['account']['sk'] = job['account']['session_key']
-        # if 'secret' in job['account']:
-        #     job['account']['token_secret'] = job['account']['secret']
-        # if 'key' in job['account']:
-        #     job['account']['token_key'] = job['account']['key']
+                if key in job['account']:
+                    job['account'][self.service_args_mapping[service_name][key]] = job['account'][key]
         # apply job fields to req and optional kwargs
         for arg in job['exposed_function']['required_arguments']:
             if arg in job['account']:
@@ -281,7 +273,7 @@ class WorkerServer(BaseServer):
         for arg in job['exposed_function']['optional_arguments']:
             if arg in job['account']:
                 kwargs[arg] = job['account'][arg]
-        LOGGER.critical(kwargs)
+        LOGGER.debug('Function: %s\nKWARGS: %s' %(job['function_name'], repr(kwargs)))
         return kwargs
         
     def getNetworkAddress(self):
