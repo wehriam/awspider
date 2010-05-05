@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 import time
 import random
 import logging
@@ -15,10 +15,14 @@ from txamqp.content import Content
 from .base import BaseServer, LOGGER
 from ..resources2 import SchedulerResource
 from ..amqp import amqp as AMQP
+from ..resources import ExposedResource
+from twisted.web.resource import Resource
 
 
 class SchedulerServer(BaseServer):
-    
+    exposed_functions = []
+    exposed_function_resources = {}
+    name = "AWSpider Schedule Server UUID: %s" % str(uuid4())
     heap = []
     enqueueCallLater = None
     
@@ -40,6 +44,7 @@ class SchedulerServer(BaseServer):
             log_file='schedulerserver.log',
             log_directory=None,
             log_level="debug"):
+        self.function_resource = Resource()
         # Create MySQL connection.
         self.mysql = adbapi.ConnectionPool(
             "MySQLdb", 
@@ -62,6 +67,8 @@ class SchedulerServer(BaseServer):
         self.amqp_exchange = amqp_exchange
         # HTTP interface
         resource = SchedulerResource(self)
+        self.function_resource = Resource()
+        resource.putChild("function", self.function_resource)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
         # Logging, etc
         BaseServer.__init__(
@@ -69,6 +76,25 @@ class SchedulerServer(BaseServer):
             log_file=log_file,
             log_directory=log_directory,
             log_level=log_level) 
+        function_name = BaseServer.makeCallable(
+            self, 
+            self.remoteAddToHeap, 
+            interval=0, 
+            name=None, 
+            expose=True)
+        er = ExposedResource(self, function_name)
+        function_name_parts = function_name.split("/")
+        if len(function_name_parts) > 1:
+            if function_name_parts[0] in self.exposed_function_resources:
+                r = self.exposed_function_resources[function_name_parts[0]]
+            else:
+                r = Resource()
+                self.exposed_function_resources[function_name_parts[0]] = r
+            self.function_resource.putChild(function_name_parts[0], r)
+            r.putChild(function_name_parts[1], er)
+        else:
+            self.function_resource.putChild(function_name_parts[0], er)
+        LOGGER.info("Function %s is now available via the HTTP interface." % function_name)
     
     def start(self):
         reactor.callWhenRunning(self._start)
@@ -176,6 +202,20 @@ class SchedulerServer(BaseServer):
     def _addToQueueErr(self, error):
         LOGGER.error(error.printBriefTraceback)
         raise
+            
+    def remoteAddToHeap(self, uuid, type):
+        pass
+        
+    def createReservation(self, function_name, **kwargs):
+        LOGGER.debug('%s Called' % function_name)
+        if function_name == 'schedulerserver/remoteaddtoheap':
+            if set(('uuid', 'type')).issubset(set(kwargs)):
+                LOGGER.debug('\tUUID: %s\n\tType: %s' % (kwargs['uuid'], kwargs['type']))
+                self.addToHeap(kwargs['uuid'], kwargs['type'])
+                return {}
+            else:
+                return {'error': 'invalid parameters passed: required parameters are uuid and type'}
+        return
         
     def addToHeap(self, uuid, type):
         # lookup if type is in the service_mapping, if it is
@@ -183,6 +223,7 @@ class SchedulerServer(BaseServer):
         if self.service_mapping and self.service_mapping.has_key(type):
             LOGGER.info('Remapping resource %s to %s' % (type, self.service_mapping[type]))
             type = self.service_mapping[type]
+        # Make sure the uuid is in bytes
         uuid = UUID(uuid).bytes
         interval = 10 #int(self.functions[type]['interval'])
         try:
@@ -192,4 +233,5 @@ class SchedulerServer(BaseServer):
             return
         enqueue_time = int(time.time() + interval)
         # Add a UUID to the heap.
+        LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
         heappush(self.heap, (enqueue_time, (uuid, interval)))
