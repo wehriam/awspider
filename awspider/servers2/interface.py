@@ -1,6 +1,8 @@
 import pprint
+import urllib
 from uuid import uuid4
 from twisted.internet.defer import Deferred, DeferredList, maybeDeferred
+from twisted.internet.threads import deferToThread
 from twisted.web.resource import Resource
 from twisted.internet import reactor
 from twisted.web import server
@@ -32,23 +34,16 @@ class InterfaceServer(BaseServer):
             log_file='interfaceserver.log',
             log_directory=None,
             log_level="debug"):
+        self.aws_access_key_id=aws_access_key_id
+        self.aws_secret_access_key=aws_secret_access_key
+        self.scheduler_server_group=scheduler_server_group
+        self.schedulerserver_port=schedulerserver_port
         resource = Resource()
         interface_resource = InterfaceResource(self)
         resource.putChild("interface", interface_resource)
         self.function_resource = Resource()
         resource.putChild("function", self.function_resource)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
-        conn = EC2Connection(aws_access_key_id, aws_secret_access_key)
-        scheduler_hostnames = []
-        scheduler_hostnames_a = scheduler_hostnames.append
-        for reservation in conn.get_all_instances():
-            for reservation_group in reservation.groups:
-                if reservation_group.id == scheduler_server_group:
-                    for instance in reservation.instances:
-                        if instance.state == "running":
-                            scheduler_hostnames_a(instance.private_dns_name)
-        if scheduler_hostnames:
-            self.scheduler_server = scheduler_hostnames[0]
         BaseServer.__init__(
             self,
             aws_access_key_id, 
@@ -64,6 +59,7 @@ class InterfaceServer(BaseServer):
             port=port)
         
     def start(self):
+        deferToThread(self.setSchedulerServer)
         reactor.callWhenRunning(self._start)
         return self.start_deferred
 
@@ -95,6 +91,24 @@ class InterfaceServer(BaseServer):
 
     def _shutdownCallback(self, data):
         return BaseServer.shutdown(self)
+        
+    def setSchedulerServer(self):
+        LOGGER.info('Locating scheduler server for security group: %s' % self.scheduler_server_group)
+        if self.scheduler_server_group:
+            conn = EC2Connection(self.aws_access_key_id, self.aws_secret_access_key)
+            scheduler_hostnames = []
+            scheduler_hostnames_a = scheduler_hostnames.append
+            for reservation in conn.get_all_instances():
+                for reservation_group in reservation.groups:
+                    if reservation_group.id == self.scheduler_server_group:
+                        for instance in reservation.instances:
+                            if instance.state == "running":
+                                scheduler_hostnames_a(instance.private_dns_name)
+            if scheduler_hostnames:
+                self.scheduler_server = scheduler_hostnames[0]
+        else:
+            self.scheduler_server = "0.0.0.0"
+        LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
     
     def makeCallable(self, func, interval=0, name=None, expose=False):
         function_name = BaseServer.makeCallable(
@@ -142,13 +156,16 @@ class InterfaceServer(BaseServer):
             parameters = {
                 'uuid': uuid
             }
-            url = 'http://%s:5004/scheduleserver/heap/remoteaddtoheap' % self.scheduler_server
+            url = 'http://%s:%s/scheduleserver/heap/remoteaddtoheap' % (self.scheduler_server, self.schedulerserver_port)
             LOGGER.info('Sending UUID to scheduler: %s' % url)
             query_string = urllib.urlencode(parameters)       
             d = self.getPage(url=url, postdata=query_string)
             d.addCallback(self._createReservationCallback2, data)
             d.addErrback(self._createReservationErrback, function_name, uuid)
             return d
+        else:
+            LOGGER.error('No scheduler server defined...')
+            raise
 
     def _createReservationCallback2(self, data):
         return data
