@@ -8,11 +8,12 @@ from .base import BaseServer, LOGGER
 from ..resources import InterfaceResource, ExposedResource
 from ..aws import sdb_now
 from ..evaluateboolean import evaluateBoolean
+from boto.ec2.connection import EC2Connection
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
 class InterfaceServer(BaseServer):
-    
+    scheduler_server = None
     exposed_functions = []
     exposed_function_resources = {}
     name = "AWSpider Interface Server UUID: %s" % str(uuid4())
@@ -22,6 +23,8 @@ class InterfaceServer(BaseServer):
             aws_secret_access_key, 
             aws_s3_http_cache_bucket=None,
             aws_s3_storage_bucket=None,
+            scheduler_server_group='flavors_spider_production',
+            schedulerserver_port=5004,
             max_simultaneous_requests=50,
             max_requests_per_host_per_second=1,
             max_simultaneous_requests_per_host=5,
@@ -35,6 +38,17 @@ class InterfaceServer(BaseServer):
         self.function_resource = Resource()
         resource.putChild("function", self.function_resource)
         self.site_port = reactor.listenTCP(port, server.Site(resource))
+        conn = EC2Connection(aws_access_key_id, aws_secret_access_key)
+        scheduler_hostnames = []
+        scheduler_hostnames_a = scheduler_hostnames.append
+        for reservation in conn.get_all_instances():
+            for reservation_group in reservation.groups:
+                if reservation_group.id == scheduler_server_group:
+                    for instance in reservation.instances:
+                        if instance.state == "running":
+                            scheduler_hostnames_a(instance.private_dns_name)
+        if scheduler_hostnames:
+            self.scheduler_server = scheduler_hostnames[0]
         BaseServer.__init__(
             self,
             aws_access_key_id, 
@@ -124,6 +138,19 @@ class InterfaceServer(BaseServer):
         return d
 
     def _createReservationCallback(self, data, function_name, uuid):
+        if self.scheduler_server:
+            parameters = {
+                'uuid': uuid
+            }
+            url = 'http://%s:5004/scheduleserver/heap/remoteaddtoheap' % self.scheduler_server
+            LOGGER.info('Sending UUID to scheduler: %s' % url)
+            query_string = urllib.urlencode(parameters)       
+            d = self.getPage(url=url, postdata=query_string)
+            d.addCallback(self._createReservationCallback2, data)
+            d.addErrback(self._createReservationErrback, function_name, uuid)
+            return d
+
+    def _createReservationCallback2(self, data):
         return data
 
     def _createReservationErrback(self, error, function_name, uuid):
