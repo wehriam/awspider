@@ -225,12 +225,18 @@ class SchedulerServer(BaseServer):
             type = self.service_mapping[type]
         # Make sure the uuid is in bytes
         uuid = UUID(uuid).bytes
+        interval = None
+        if self.functions.has_key(type) and self.functions[type].has_key('interval'):
+            interval = int(self.functions[type]['interval'])
         try:
             type = self.function_names.index(type)
         except:
             LOGGER.error("Unsupported function type: %s" % type)
             return
-        interval = int(self.functions[type]['interval'])
+        if not interval and self.functions.has_key(type) and self.functions[type].has_key('interval'):
+            interval = int(self.functions[type]['interval'])
+        else:
+            internal = 18000
         enqueue_time = int(time.time() + interval)
         # Add a UUID to the heap.
         LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
