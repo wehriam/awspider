@@ -3,11 +3,12 @@ from setuptools import setup, find_packages
 setup(
 
     name = "AWSpider",
+
     version = "0.2.6.6",
 
     packages = find_packages(),
 
-    install_requires = ['twisted>=8.1', 'genshi>=0.5.1', 'python-dateutil>=1.4', 'simplejson>=2.0.9'],
+    install_requires = ['twisted>=8.1', 'genshi>=0.5.1', 'python-dateutil>=1.4', 'simplejson>=2.0.9', 'boto'],
     include_package_data = True,
     
     # metadata for upload to PyPI

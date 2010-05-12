@@ -204,6 +204,7 @@ class SchedulerServer(BaseServer):
         raise
             
     def remoteAddToHeap(self, uuid, type):
+        LOGGER.debug('remoteAddToHeap: uuid=%s, type=%s' % (uuid, type))
         pass
         
     def createReservation(self, function_name, **kwargs):
@@ -225,12 +226,18 @@ class SchedulerServer(BaseServer):
             type = self.service_mapping[type]
         # Make sure the uuid is in bytes
         uuid = UUID(uuid).bytes
-        interval = 10 #int(self.functions[type]['interval'])
+        interval = None
+        if self.functions.has_key(type) and self.functions[type].has_key('interval'):
+            interval = int(self.functions[type]['interval'])
         try:
             type = self.function_names.index(type)
         except:
             LOGGER.error("Unsupported function type: %s" % type)
             return
+        if not interval and self.functions.has_key(type) and self.functions[type].has_key('interval'):
+            interval = int(self.functions[type]['interval'])
+        else:
+            internal = 18000
         enqueue_time = int(time.time() + interval)
         # Add a UUID to the heap.
         LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))

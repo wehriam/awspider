@@ -246,7 +246,7 @@ class WorkerServer(BaseServer):
             LOGGER.info('Remapping resource %s to %s' % (function_name, self.service_mapping[function_name]))
             function_name = self.service_mapping[function_name]
         job['function_name'] = function_name
-        job['reservation_cache'] = None
+        # job['reservation_cache'] = None
         job['uuid'] = uuid
         job['account'] = account
         # Save account info in memcached for up to 7 days
