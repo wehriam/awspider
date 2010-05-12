@@ -167,8 +167,8 @@ class InterfaceServer(BaseServer):
             LOGGER.error('No scheduler server defined...')
             raise
 
-    def _createReservationCallback2(self, data):
-        return data
+    def _createReservationCallback2(self, data, reservation_data):
+        return reservation_data
 
     def _createReservationErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
