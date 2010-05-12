@@ -103,7 +103,7 @@ class InterfaceServer(BaseServer):
                     if reservation_group.id == self.scheduler_server_group:
                         for instance in reservation.instances:
                             if instance.state == "running":
-                                scheduler_hostnames_a(instance.dns_name)
+                                scheduler_hostnames_a(instance.private_dns_name)
             if scheduler_hostnames:
                 self.scheduler_server = scheduler_hostnames[0]
         else:
