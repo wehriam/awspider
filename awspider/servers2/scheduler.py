@@ -204,6 +204,7 @@ class SchedulerServer(BaseServer):
         raise
             
     def remoteAddToHeap(self, uuid, type):
+        LOGGER.debug('remoteAddToHeap: uuid=%s, type=%s' % (uuid, type))
         pass
         
     def createReservation(self, function_name, **kwargs):

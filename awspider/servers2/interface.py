@@ -156,7 +156,7 @@ class InterfaceServer(BaseServer):
             parameters = {
                 'uuid': uuid
             }
-            url = 'http://%s:%s/scheduleserver/heap/remoteaddtoheap' % (self.scheduler_server, self.schedulerserver_port)
+            url = 'http://%s:%s/function/schedulerserver/heap/remoteaddtoheap' % (self.scheduler_server, self.schedulerserver_port)
             LOGGER.info('Sending UUID to scheduler: %s' % url)
             query_string = urllib.urlencode(parameters)       
             d = self.getPage(url=url, postdata=query_string)
