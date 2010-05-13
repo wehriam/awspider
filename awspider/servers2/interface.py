@@ -178,4 +178,4 @@ class InterfaceServer(BaseServer):
 
     def _createReservationErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
-        return uuid
+        return error
