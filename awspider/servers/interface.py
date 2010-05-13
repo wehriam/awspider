@@ -168,6 +168,7 @@ class InterfaceServer(BaseServer):
             return d
             
     def _createReservationCallback(self, data, function_name, uuid):
+        LOGGER.error(data)
         LOGGER.debug("Created reservation on SimpleDB for %s, %s." % (function_name, uuid))
         return uuid
 
@@ -176,6 +177,7 @@ class InterfaceServer(BaseServer):
         return error
 
     def _createReservationCallback2(self, data, function_name, uuid):
+        LOGGER.critical(data)
         for row in data:
             if row[0] == False:
                 raise row[1]

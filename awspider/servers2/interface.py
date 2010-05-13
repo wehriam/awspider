@@ -161,24 +161,20 @@ class InterfaceServer(BaseServer):
             url = 'http://%s:%s/function/schedulerserver/remoteaddtoheap?%s' % (self.scheduler_server, self.schedulerserver_port, query_string)
             LOGGER.info('Sending UUID to scheduler: %s' % url)
             d = self.getPage(url=url)
-            d.addCallback(self._createReservationCallback2, uuid, data)
+            d.addCallback(self._createReservationCallback2, function_name, uuid, data)
             d.addErrback(self._createReservationErrback, function_name, uuid)
             return d
         else:
             LOGGER.error('No scheduler server defined...')
             raise
 
-    def _createReservationCallback2(self, data, uuid, reservation_data):
-        # avoid adding in the uuid if its already there.
-        output = None
-        try:
-            if reservation_data.has_key('info'):
-                output = {uuid: reservation_data}
-        except:
-            pass
-        if not output:
-            output = reservation_data
-        return output
+    def _createReservationCallback2(self, data, function_name, uuid, reservation_data):
+        if len(reservation_data) == 1:
+            return {uuid: {}}
+        elif type(reservation_data) == dict and uuid in reservation_data.keys():
+            return reservation_data
+        else:
+            return {uuid: reservation_data}
 
     def _createReservationErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
