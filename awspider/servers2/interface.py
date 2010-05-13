@@ -169,7 +169,11 @@ class InterfaceServer(BaseServer):
             raise
 
     def _createReservationCallback2(self, data, uuid, reservation_data):
-        output = {uuid: reservation_data}
+        # avoid adding in the uuid if its already there.
+        if reservation_data.has_key('info'):
+            output = {uuid: reservation_data}
+        else:
+            output = reservation_data
         return output
 
     def _createReservationErrback(self, error, function_name, uuid):
