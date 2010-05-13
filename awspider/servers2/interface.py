@@ -170,6 +170,7 @@ class InterfaceServer(BaseServer):
 
     def _createReservationCallback2(self, data, uuid, reservation_data):
         # avoid adding in the uuid if its already there.
+        output = None
         try:
             if reservation_data.has_key('info'):
                 output = {uuid: reservation_data}
