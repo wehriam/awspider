@@ -169,6 +169,7 @@ class InterfaceServer(BaseServer):
             raise
 
     def _createReservationCallback2(self, data, function_name, uuid, reservation_data):
+        LOGGER.debug('reservation_data: %s (%s)' % (repr(reservation_data), type(reservation_data)))
         if len(reservation_data) == 1:
             return reservation_data
         else:
