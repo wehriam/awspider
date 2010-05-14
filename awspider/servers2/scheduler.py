@@ -240,7 +240,7 @@ class SchedulerServer(BaseServer):
             if not interval and self.functions.has_key(type) and self.functions[type].has_key('interval'):
                 interval = int(self.functions[type]['interval'])
             else:
-                internal = 18000
+                interval = 18000
             enqueue_time = int(time.time() + interval)
             # Add a UUID to the heap.
             LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
