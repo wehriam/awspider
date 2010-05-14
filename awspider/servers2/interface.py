@@ -169,10 +169,12 @@ class InterfaceServer(BaseServer):
             raise
 
     def _createReservationCallback2(self, data, function_name, uuid, reservation_data):
-        LOGGER.debug('reservation_data: %s (%s)' % (repr(reservation_data), type(reservation_data)))
+        LOGGER.debug('reservation_data: %s (%s)\n\tlength: %s' % (repr(reservation_data), type(reservation_data), len(reservation_data)))
         if len(reservation_data) == 1:
+            LOGGER.critical('foobar')
             return reservation_data
         else:
+            LOGGER.critical('barfoo')
             return {uuid: reservation_data}
 
     def _createReservationErrback(self, error, function_name, uuid):
