@@ -169,7 +169,7 @@ class InterfaceServer(BaseServer):
             raise
 
     def _createReservationCallback2(self, data, function_name, uuid, reservation_data):
-        if type(reservation_data) == dict and len(reservation_data) == 1:
+        if len(reservation_data) == 1:
             return reservation_data
         else:
             return {uuid: reservation_data}
