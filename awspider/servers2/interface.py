@@ -134,6 +134,7 @@ class InterfaceServer(BaseServer):
             LOGGER.info("Function %s is now available via the HTTP interface." % function_name)
             
     def createReservation(self, function_name, **kwargs):
+        uuid = None
         if not isinstance(function_name, str):
             for key in self.functions:
                 if self.functions[key]["function"] == function_name:
