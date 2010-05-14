@@ -177,7 +177,6 @@ class InterfaceServer(BaseServer):
         return error
 
     def _createReservationCallback2(self, data, function_name, uuid):
-        LOGGER.critical(data)
         for row in data:
             if row[0] == False:
                 raise row[1]

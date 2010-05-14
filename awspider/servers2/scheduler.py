@@ -213,7 +213,8 @@ class SchedulerServer(BaseServer):
             LOGGER.debug('kwargs: %s' % repr(kwargs))
             if set(('uuid', 'type')).issubset(set(kwargs)):
                 LOGGER.debug('\tUUID: %s\n\tType: %s' % (kwargs['uuid'], kwargs['type']))
-                self.addToHeap(kwargs['uuid'], kwargs['type'])
+                if kwargs['uuid']:
+                    self.addToHeap(kwargs['uuid'], kwargs['type'])
                 return {}
             else:
                 return {'error': 'invalid parameters passed: required parameters are uuid and type'}
@@ -227,7 +228,6 @@ class SchedulerServer(BaseServer):
             type = self.service_mapping[type]
         try:
             # Make sure the uuid is in bytes
-            LOGGER.critical(uuid)
             uuid = UUID(uuid).bytes
             interval = None
             if self.functions.has_key(type) and self.functions[type].has_key('interval'):
