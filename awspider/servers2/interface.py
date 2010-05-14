@@ -134,7 +134,6 @@ class InterfaceServer(BaseServer):
             LOGGER.info("Function %s is now available via the HTTP interface." % function_name)
             
     def createReservation(self, function_name, **kwargs):
-        uuid = uuid4().hex
         if not isinstance(function_name, str):
             for key in self.functions:
                 if self.functions[key]["function"] == function_name:
@@ -142,6 +141,8 @@ class InterfaceServer(BaseServer):
                     break
         if function_name not in self.functions:
             raise Exception("Function %s does not exist." % function_name)
+        if function["interval"] > 0
+            uuid = uuid4().hex
         d = self.callExposedFunction(
             self.functions[function_name]["function"], 
             kwargs, 
