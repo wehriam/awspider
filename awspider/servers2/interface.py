@@ -141,7 +141,7 @@ class InterfaceServer(BaseServer):
                     break
         if function_name not in self.functions:
             raise Exception("Function %s does not exist." % function_name)
-        if function["interval"] > 0
+        if function["interval"] > 0:
             uuid = uuid4().hex
         d = self.callExposedFunction(
             self.functions[function_name]["function"], 
