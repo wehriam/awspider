@@ -204,6 +204,7 @@ class WorkerServer(BaseServer):
             else:
                 # assign a temp uuid
                 uuid = UUID(bytes=msg.content.body).hex
+            self.chan.basic_ack(delivery_tag=job['delivery_tag'])
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
@@ -213,7 +214,6 @@ class WorkerServer(BaseServer):
             d.addErrback(self.workerErrback, 'Execute Jobs')
         
     def _executeJobCallback(self, data, job):
-        self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
         
