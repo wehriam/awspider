@@ -157,34 +157,42 @@ class WorkerServer(BaseServer):
         #close memcache connection
         
     def dequeue(self):
-        LOGGER.debug('did this start?')
+        LOGGER.debug('Pending Deuque: %s / Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.pending_dequeue, self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
         if len(self.job_queue) <= self.amqp_prefetch_count and not self.pending_dequeue:
-            LOGGER.info('Job Queue len = %d' % len(self.job_queue))
             self.pending_dequeue = True
+            LOGGER.debug('Fetching from queue')
             d = self.queue.get()
             d.addCallback(self._dequeueCallback)
-            d.addErrback(self.workerErrback, 'Dequeue')
+            d.addErrback(self._dequeueErrback)
+        else:
+            reactor.callLater(1, self.dequeue)
+            
+    def _dequeueErrback(self, error):
+        LOGGER.error('Dequeue Error: %s' % error)
+        self.pending_dequeue = False
+        reactor.callLater(0, self.dequeue)
         
     def _dequeueCallback(self, msg):
+        LOGGER.debug('fetched msg from queue: %s' % repr(msg))
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
         d = self.getJob(uuid, msg.delivery_tag)
         d.addCallback(self._dequeueCallback2, msg)
-        d.addErrback(self.workerErrback, 'Dequeue Callback')
+        d.addErrback(self._dequeueErrback, 'Dequeue Callback')
     
     def _dequeueCallback2(self, job, msg):
         # Load custom function.
         if job['function_name'] in self.functions:
             job['exposed_function'] = self.functions[job['function_name']]
+            LOGGER.debug('Pulled job off of AMQP queue')
+            job['kwargs'] = self.mapKwargs(job)
+            job['delivery_tag'] = msg.delivery_tag
+            self.job_queue_a(job)
         else:
             LOGGER.error("Could not find function %s." % job['function_name'])
-        LOGGER.info('Pulled job off of AMQP queue')
-        job['kwargs'] = self.mapKwargs(job)
-        job['delivery_tag'] = msg.delivery_tag
-        self.job_queue_a(job)
         self.pending_dequeue = False
         reactor.callLater(0, self.dequeue)
-    
+        
     def executeJobs(self):
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
             job = self.job_queue.pop(0)
@@ -207,7 +215,7 @@ class WorkerServer(BaseServer):
     def _executeJobCallback(self, data, job):
         self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         self.jobs_complete += 1
-        LOGGER.info('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
+        LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
         
     def workerErrback(self, error, function_name='Worker'):
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
@@ -240,7 +248,7 @@ class WorkerServer(BaseServer):
             d.addCallback(self.createJob, spider_info, uuid)
             d.addErrback(self.workerErrback, 'Get MySQL Account')
             return d
-        LOGGER.info('No spider_info given for uuid %s' % uuid)
+        LOGGER.debug('No spider_info given for uuid %s' % uuid)
         self.chan.basic_ack(delivery_tag=delivery_tag)
         return None
     
@@ -249,10 +257,9 @@ class WorkerServer(BaseServer):
         account = account_info[0]
         function_name = spider_info[0]['type']
         if self.service_mapping and self.service_mapping.has_key(function_name):
-            LOGGER.info('Remapping resource %s to %s' % (function_name, self.service_mapping[function_name]))
+            LOGGER.debug('Remapping resource %s to %s' % (function_name, self.service_mapping[function_name]))
             function_name = self.service_mapping[function_name]
         job['function_name'] = function_name
-        # job['reservation_cache'] = None
         job['uuid'] = uuid
         job['account'] = account
         # Save account info in memcached for up to 7 days
