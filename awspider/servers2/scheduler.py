@@ -230,21 +230,15 @@ class SchedulerServer(BaseServer):
         try:
             # Make sure the uuid is in bytes
             uuid = UUID(uuid).bytes
-            interval = None
-            if self.functions.has_key(type) and self.functions[type].has_key('interval'):
-                interval = int(self.functions[type]['interval'])
-            try:
-                type = self.function_names.index(type)
-            except:
-                LOGGER.error("Unsupported function type: %s" % type)
-                return
-            if not interval and self.functions.has_key(type) and self.functions[type].has_key('interval'):
-                interval = int(self.functions[type]['interval'])
-            else:
-                interval = 18000
-            enqueue_time = int(time.time() + interval)
-            # Add a UUID to the heap.
-            LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
-            heappush(self.heap, (enqueue_time, (uuid, interval)))
         except ValueError:
-            pass
+            LOGGER.error('Cound not turn UUID into byes using string %s' % uuid)
+            return
+        if self.functions.has_key(type) and self.functions[type].has_key('interval'):
+            interval = int(self.functions[type]['interval'])
+        else:
+            LOGGER.error('Could not find interval for type %s' % type)
+            return
+        enqueue_time = int(time.time() + interval)
+        # Add a UUID to the heap.
+        LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
+        heappush(self.heap, (enqueue_time, (uuid, interval)))
