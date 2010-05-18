@@ -197,7 +197,8 @@ class BaseServer(object):
                 function_name, 
                 uuid,
                 error))
-        return error
+        # return error
+        return
 
     def _callExposedFunctionCallback(self, data, function_name, uuid):
         LOGGER.debug("Function %s returned successfully." % (function_name))
