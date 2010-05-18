@@ -21,11 +21,12 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    simultaneous_jobs = 100
-    doSomethingCallLater = None
+    simultaneous_jobs = 20
     jobs_complete = 0
     job_queue = []
     job_queue_a = job_queue.append
+    dqloop = None
+    jobsloop = None
     
     def __init__(self,
             aws_access_key_id,
@@ -130,20 +131,25 @@ class WorkerServer(BaseServer):
         yield self.chan.queue_bind(
             queue=self.amqp_queue,
             exchange=self.amqp_exchange)
-        d = self.chan.basic_consume(queue=self.amqp_queue,
+        yield self.chan.basic_consume(queue=self.amqp_queue,
             no_ack=False,
             consumer_tag="awspider_consumer")
-        d.addCallback(self.dequeue)
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
         self.jobsloop = task.LoopingCall(self.executeJobs)
         self.jobsloop.start(1)
+        self.dqloop = task.LoopingCall(self.dequeue)
+        self.dqloop.start(1)
     
     @inlineCallbacks
     def shutdown(self):
-        LOGGER.debug("Closting connection")
+        LOGGER.debug("Closing connection")
         try:
-            self.doSomethingCallLater.cancel()
+            self.jobsloop.cancel()
+        except:
+            pass
+        try:
+            self.dqloop.cancel()
         except:
             pass
         # Shut things down
@@ -151,19 +157,17 @@ class WorkerServer(BaseServer):
         yield self.chan.channel_close()
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
+        #close mysql connection
+        #close memcache connection
         
-    def dequeue(self, consumer=None):
-        LOGGER.info('Starting Dequeuing Thread...')
-        deferToThread(self._dequeue)
-    
-    def _dequeue(self):
-        if len(self.active_jobs) <= self.amqp_prefetch_count:
+    def dequeue(self):
+        LOGGER.debug('did this start?')
+        while len(self.job_queue) <= self.amqp_prefetch_count:
+            LOGGER.info('Job Queue len = %d' % len(self.job_queue))
             d = self.queue.get()
             d.addCallback(self._dequeueCallback)
             d.addErrback(self.workerError, 'Dequeue')
-        else:
-            reactor.callLater(1, self._dequeue)
-    
+            
     def _dequeueCallback(self, msg):
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
@@ -172,17 +176,15 @@ class WorkerServer(BaseServer):
         d.addErrback(self.workerError, 'Dequeue Callback')
     
     def _dequeueCallback2(self, job, msg):
-        if job:
-            # Load custom function.
-            if job['function_name'] in self.functions:
-                job['exposed_function'] = self.functions[job['function_name']]
-            else:
-                LOGGER.error("Could not find function %s." % job['function_name'])
-            LOGGER.info('Pulled job off of AMQP queue')
-            job['kwargs'] = self.mapKwargs(job)
-            job['delivery_tag'] = msg.delivery_tag
-            self.job_queue_a(job)
-        self._dequeue()
+        # Load custom function.
+        if job['function_name'] in self.functions:
+            job['exposed_function'] = self.functions[job['function_name']]
+        else:
+            LOGGER.error("Could not find function %s." % job['function_name'])
+        LOGGER.info('Pulled job off of AMQP queue')
+        job['kwargs'] = self.mapKwargs(job)
+        job['delivery_tag'] = msg.delivery_tag
+        self.job_queue_a(job)
     
     def executeJobs(self):
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
@@ -261,7 +263,8 @@ class WorkerServer(BaseServer):
     
     def _createJobCallback(self, memc, job):
         return job
-        
+    
+    # TODO: map before putting into memcache
     def mapKwargs(self, job):
         kwargs = {}
         service_name = job['function_name'].split('/')[0]
