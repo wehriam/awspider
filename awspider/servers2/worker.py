@@ -160,7 +160,7 @@ class WorkerServer(BaseServer):
         if len(self.active_jobs) <= self.amqp_prefetch_count:
             d = self.queue.get()
             d.addCallback(self._dequeueCallback)
-            d.addErrback(self.workerError)
+            d.addErrback(self.workerError, 'Dequeue')
         else:
             reactor.callLater(1, self._dequeue)
     
@@ -169,7 +169,7 @@ class WorkerServer(BaseServer):
         uuid = UUID(bytes=msg.content.body).hex
         d = self.getJob(uuid, msg.delivery_tag)
         d.addCallback(self._dequeueCallback2, msg)
-        d.addErrback(self.workerError)
+        d.addErrback(self.workerError, 'Dequeue Callback')
     
     def _dequeueCallback2(self, job, msg):
         if job:
@@ -197,20 +197,20 @@ class WorkerServer(BaseServer):
                 function_name, 
                 uuid=uuid)
             d.addCallback(self._executeJobCallback, job)
-            d.addErrback(self.workerError)
+            d.addErrback(self.workerError, 'Execute Jobs')
         
     def _executeJobCallback(self, data, job):
         self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         self.jobs_complete += 1
         LOGGER.info('Completed %d jobs' % self.jobs_complete)
         
-    def workerError(self, error):
-        LOGGER.error('Worker Error: %s' % str(error))
+    def workerError(self, error, function_name='Worker'):
+        LOGGER.error('%s Error: %s' % (function_name, str(error)))
     
     def getJob(self, uuid, delivery_tag):
         d = self.memc.get(uuid)
         d.addCallback(self._getJobCallback, uuid, delivery_tag)
-        d.addErrback(self.workerError)
+        d.addErrback(self.workerError, 'Get Job')
         return d
     
     def _getJobCallback(self, account, uuid, delivery_tag):
@@ -220,7 +220,7 @@ class WorkerServer(BaseServer):
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
             d.addCallback(self.getAccountMySQL, uuid, delivery_tag)
-            d.addErrback(self.workerError)
+            d.addErrback(self.workerError, 'Get Job Callback')
             return d
         else:
             LOGGER.debug('Found uuid in memcached: %s' % uuid)
@@ -232,7 +232,7 @@ class WorkerServer(BaseServer):
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
             d = self.mysql.runQuery(sql)
             d.addCallback(self.createJob, spider_info, uuid)
-            d.addErrback(self.workerError)
+            d.addErrback(self.workerError, 'Get MySQL Account')
             return d
         LOGGER.info('No spider_info given for uuid %s' % uuid)
         self.chan.basic_ack(delivery_tag=delivery_tag)
@@ -252,7 +252,7 @@ class WorkerServer(BaseServer):
         # Save account info in memcached for up to 7 days
         d = self.memc.set(uuid, simplejson.dumps(job), 60*60*24*7)
         d.addCallback(self._createJobCallback, job)
-        d.addErrback(self.workerError)
+        d.addErrback(self.workerError, 'Create Job')
         return d
     
     def _createJobCallback(self, memc, job):
