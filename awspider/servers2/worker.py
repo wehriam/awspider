@@ -190,7 +190,10 @@ class WorkerServer(BaseServer):
             exposed_function = job["exposed_function"]
             kwargs = job["kwargs"]
             function_name = job["function_name"]
-            uuid = job["uuid"]
+            if job.has_key('uuid'):
+                uuid = job["uuid"]
+            else:
+                uuid = None
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
