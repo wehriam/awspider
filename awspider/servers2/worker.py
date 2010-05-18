@@ -193,7 +193,8 @@ class WorkerServer(BaseServer):
             if job.has_key('uuid'):
                 uuid = job["uuid"]
             else:
-                uuid = None
+                # assign a temp uuid
+                uuid = UUID(bytes=msg.content.body).hex
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
