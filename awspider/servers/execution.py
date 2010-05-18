@@ -31,7 +31,7 @@ class ExecutionServer(BaseServer):
     job_queue = []
     job_count = 0
     query_start_time = None
-    simultaneous_jobs = 30
+    simultaneous_jobs = 25
     querying_for_jobs = False
     reservation_update_queue = []
     current_sql = ""

@@ -210,9 +210,11 @@ class SchedulerServer(BaseServer):
     def createReservation(self, function_name, **kwargs):
         LOGGER.debug('%s Called' % function_name)
         if function_name == 'schedulerserver/remoteaddtoheap':
+            LOGGER.debug('kwargs: %s' % repr(kwargs))
             if set(('uuid', 'type')).issubset(set(kwargs)):
                 LOGGER.debug('\tUUID: %s\n\tType: %s' % (kwargs['uuid'], kwargs['type']))
-                self.addToHeap(kwargs['uuid'], kwargs['type'])
+                if kwargs['uuid']:
+                    self.addToHeap(kwargs['uuid'], kwargs['type'])
                 return {}
             else:
                 return {'error': 'invalid parameters passed: required parameters are uuid and type'}
@@ -224,21 +226,24 @@ class SchedulerServer(BaseServer):
         if self.service_mapping and self.service_mapping.has_key(type):
             LOGGER.info('Remapping resource %s to %s' % (type, self.service_mapping[type]))
             type = self.service_mapping[type]
-        # Make sure the uuid is in bytes
-        uuid = UUID(uuid).bytes
-        interval = None
-        if self.functions.has_key(type) and self.functions[type].has_key('interval'):
-            interval = int(self.functions[type]['interval'])
         try:
-            type = self.function_names.index(type)
-        except:
-            LOGGER.error("Unsupported function type: %s" % type)
-            return
-        if not interval and self.functions.has_key(type) and self.functions[type].has_key('interval'):
-            interval = int(self.functions[type]['interval'])
-        else:
-            internal = 18000
-        enqueue_time = int(time.time() + interval)
-        # Add a UUID to the heap.
-        LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
-        heappush(self.heap, (enqueue_time, (uuid, interval)))
+            # Make sure the uuid is in bytes
+            uuid = UUID(uuid).bytes
+            interval = None
+            if self.functions.has_key(type) and self.functions[type].has_key('interval'):
+                interval = int(self.functions[type]['interval'])
+            try:
+                type = self.function_names.index(type)
+            except:
+                LOGGER.error("Unsupported function type: %s" % type)
+                return
+            if not interval and self.functions.has_key(type) and self.functions[type].has_key('interval'):
+                interval = int(self.functions[type]['interval'])
+            else:
+                interval = 18000
+            enqueue_time = int(time.time() + interval)
+            # Add a UUID to the heap.
+            LOGGER.debug('Adding %s to heap with enqueue_time %s and interval of %s' % (UUID(bytes=uuid).hex, enqueue_time, interval))
+            heappush(self.heap, (enqueue_time, (uuid, interval)))
+        except ValueError:
+            pass

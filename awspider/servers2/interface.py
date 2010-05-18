@@ -134,7 +134,7 @@ class InterfaceServer(BaseServer):
             LOGGER.info("Function %s is now available via the HTTP interface." % function_name)
             
     def createReservation(self, function_name, **kwargs):
-        uuid = uuid4().hex
+        uuid = None
         if not isinstance(function_name, str):
             for key in self.functions:
                 if self.functions[key]["function"] == function_name:
@@ -142,6 +142,9 @@ class InterfaceServer(BaseServer):
                     break
         if function_name not in self.functions:
             raise Exception("Function %s does not exist." % function_name)
+        function = self.functions[function_name]
+        if function["interval"] > 0:
+            uuid = uuid4().hex
         d = self.callExposedFunction(
             self.functions[function_name]["function"], 
             kwargs, 
@@ -154,22 +157,27 @@ class InterfaceServer(BaseServer):
     def _createReservationCallback(self, data, function_name, uuid):
         if self.scheduler_server:
             parameters = {
-                'uuid': uuid
+                'uuid': uuid,
+                'type': function_name
             }
-            url = 'http://%s:%s/function/schedulerserver/remoteaddtoheap' % (self.scheduler_server, self.schedulerserver_port)
-            LOGGER.info('Sending UUID to scheduler: %s' % url)
             query_string = urllib.urlencode(parameters)       
-            d = self.getPage(url=url, postdata=query_string)
-            d.addCallback(self._createReservationCallback2, data)
+            url = 'http://%s:%s/function/schedulerserver/remoteaddtoheap?%s' % (self.scheduler_server, self.schedulerserver_port, query_string)
+            LOGGER.info('Sending UUID to scheduler: %s' % url)
+            d = self.getPage(url=url)
+            d.addCallback(self._createReservationCallback2, function_name, uuid, data)
             d.addErrback(self._createReservationErrback, function_name, uuid)
             return d
         else:
             LOGGER.error('No scheduler server defined...')
             raise
 
-    def _createReservationCallback2(self, data):
-        return data
+    def _createReservationCallback2(self, data, function_name, uuid, reservation_data):
+        LOGGER.debug("Function %s returned successfully." % (function_name))
+        if not uuid:
+            return reservation_data
+        else:
+            return {uuid: reservation_data}
 
     def _createReservationErrback(self, error, function_name, uuid):
         LOGGER.error("Unable to create reservation for %s:%s, %s.\n" % (function_name, uuid, error))
-        return {}
+        return error

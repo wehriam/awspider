@@ -174,7 +174,8 @@ class BaseServer(object):
         
     def _callExposedFunctionErrback(self, error, function_name, uuid):
         if uuid is not None:
-            del self.active_jobs[uuid]
+            if uuid in self.active_jobs:
+                del self.active_jobs[uuid]
         try:
             error.raiseException()
         except DeleteReservationException, e:
@@ -196,7 +197,7 @@ class BaseServer(object):
                 function_name, 
                 uuid,
                 error))
-        # return error
+        return error
 
     def _callExposedFunctionCallback(self, data, function_name, uuid):
         LOGGER.debug("Function %s returned successfully." % (function_name))
