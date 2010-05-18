@@ -138,8 +138,8 @@ class WorkerServer(BaseServer):
         yield BaseServer.start(self)
         self.jobsloop = task.LoopingCall(self.executeJobs)
         self.jobsloop.start(1)
-        self.dqloop = task.LoopingCall(self.dequeue)
-        self.dqloop.start(1)
+        LOGGER.info('Starting dequeueing thread...')
+        deferToThread(self.dequeue)
     
     @inlineCallbacks
     def shutdown(self):
@@ -162,11 +162,12 @@ class WorkerServer(BaseServer):
         
     def dequeue(self):
         LOGGER.debug('did this start?')
-        while len(self.job_queue) <= self.amqp_prefetch_count:
-            LOGGER.info('Job Queue len = %d' % len(self.job_queue))
-            d = self.queue.get()
-            d.addCallback(self._dequeueCallback)
-            d.addErrback(self.workerError, 'Dequeue')
+        while True:
+            if len(self.job_queue) <= self.amqp_prefetch_count:
+                LOGGER.info('Job Queue len = %d' % len(self.job_queue))
+                d = self.queue.get()
+                d.addCallback(self._dequeueCallback)
+                d.addErrback(self.workerError, 'Dequeue')
             
     def _dequeueCallback(self, msg):
         # Get the hex version of the UUID from byte string we were sent
