@@ -25,6 +25,8 @@ class SchedulerServer(BaseServer):
     name = "AWSpider Schedule Server UUID: %s" % str(uuid4())
     heap = []
     enqueueCallLater = None
+    statusloop = None
+    amqp_queue_size = 0
     
     def __init__(self,
             mysql_username,
@@ -129,6 +131,8 @@ class SchedulerServer(BaseServer):
             exchange=self.amqp_exchange)
         # Build heap from data in MySQL
         yield self._loadFromMySQL()
+        self.statusloop = task.LoopingCall(self.queueStatusCheck)
+        self.statusloop.start(60)
         
     def _loadFromMySQL(self, start=0):
         # Select the entire spider_service DB, 10k rows at at time.
@@ -171,6 +175,14 @@ class SchedulerServer(BaseServer):
     def enqueue(self):
         # Defer this to a thread so we don't block on the web interface.
         deferToThread(self._enqueue)
+
+    @inlineCallbacks
+    def queueStatusCheck(self):
+        queue_status = yield self.chan.queue_declare(
+            queue=self.amqp_queue,
+            passive=True)
+        self.amqp_queue_size = queue_status.fields[1]
+        LOGGER.debug('AMQP queue size: %d' % self.amqp_queue_size)
         
     def _enqueue(self):
         now = int(time.time())
@@ -178,13 +190,16 @@ class SchedulerServer(BaseServer):
         # If it's time for the item to be queued, pop it, update the 
         # timestamp and add it back to the heap for the next go round.
         queue_items = []
-        queue_items_a = queue_items.append
-        LOGGER.debug("%s:%s" % (self.heap[0][0], now))
-        while self.heap[0][0] < now:
-            job = heappop(self.heap)
-            queue_items_a(job[1][0])
-            new_job = (now + job[1][1], job[1])
-            heappush(self.heap, new_job)
+        if self.amqp_queue_size < 100000:
+            queue_items_a = queue_items.append
+            LOGGER.debug("%s:%s" % (self.heap[0][0], now))
+            while self.heap[0][0] < now:
+                job = heappop(self.heap)
+                queue_items_a(job[1][0])
+                new_job = (now + job[1][1], job[1])
+                heappush(self.heap, new_job)
+        else:
+            LOGGER.critical('AMQP queue is at or beyond max limit (%d/100000)' % self.amqp_queue_size)
         # add items to amqp
         if queue_items:
             LOGGER.info('Found %d new uuids, adding them to the queue' % len(queue_items))
