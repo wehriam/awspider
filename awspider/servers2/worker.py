@@ -171,6 +171,7 @@ class WorkerServer(BaseServer):
         LOGGER.error('Dequeue Error: %s' % error)
         self.pending_dequeue = False
         reactor.callLater(0, self.dequeue)
+        return error
         
     def _dequeueCallback(self, msg):
         LOGGER.debug('fetched msg from queue: %s' % repr(msg))
