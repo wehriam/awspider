@@ -221,6 +221,7 @@ class WorkerServer(BaseServer):
     def workerErrback(self, error, function_name='Worker'):
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
+        LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
         self.pending_dequeue = False
         return error
     
