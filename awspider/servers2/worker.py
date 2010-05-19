@@ -221,6 +221,7 @@ class WorkerServer(BaseServer):
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         self.pending_dequeue = False
+        return error
     
     def getJob(self, uuid, delivery_tag):
         d = self.memc.get(uuid)
