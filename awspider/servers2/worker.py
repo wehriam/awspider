@@ -153,8 +153,8 @@ class WorkerServer(BaseServer):
         yield self.chan.channel_close()
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
-        #close mysql connection
-        #close memcache connection
+        #TODO close mysql connection
+        #TODO close memcache connection
         
     def dequeue(self):
         LOGGER.debug('Pending Deuque: %s / Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.pending_dequeue, self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
@@ -187,7 +187,8 @@ class WorkerServer(BaseServer):
             job['exposed_function'] = self.functions[job['function_name']]
             LOGGER.debug('Pulled job off of AMQP queue')
             job['kwargs'] = self.mapKwargs(job)
-            job['delivery_tag'] = msg.delivery_tag
+            if not 'delivery_tag' in job:
+                job['delivery_tag'] = msg.delivery_tag
             self.job_queue_a(job)
         else:
             LOGGER.error("Could not find function %s." % job['function_name'])
@@ -212,23 +213,24 @@ class WorkerServer(BaseServer):
                 function_name, 
                 uuid=uuid)
             d.addCallback(self._executeJobCallback, job)
-            d.addErrback(self.workerErrback, 'Execute Jobs')
+            d.addErrback(self.workerErrback, 'Execute Jobs', job['delivery_tag'])
         
     def _executeJobCallback(self, data, job):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
         
-    def workerErrback(self, error, function_name='Worker'):
+    def workerErrback(self, error, function_name='Worker', delivery_tag=None):
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
+        self.chan.basic_ack(delivery_tag=delivery_tag)
         self.pending_dequeue = False
         return error
     
     def getJob(self, uuid, delivery_tag):
         d = self.memc.get(uuid)
         d.addCallback(self._getJobCallback, uuid, delivery_tag)
-        d.addErrback(self.workerErrback, 'Get Job')
+        d.addErrback(self.workerErrback, 'Get Job', delivery_tag)
         return d
     
     def _getJobCallback(self, account, uuid, delivery_tag):
@@ -238,7 +240,7 @@ class WorkerServer(BaseServer):
             sql = "SELECT account_id, type FROM spider_service WHERE uuid = '%s'" % uuid
             d = self.mysql.runQuery(sql)
             d.addCallback(self.getAccountMySQL, uuid, delivery_tag)
-            d.addErrback(self.workerErrback, 'Get Job Callback')
+            d.addErrback(self.workerErrback, 'Get Job Callback', delivery_tag)
             return d
         else:
             LOGGER.debug('Found uuid in memcached: %s' % uuid)
@@ -250,13 +252,12 @@ class WorkerServer(BaseServer):
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
             d = self.mysql.runQuery(sql)
             d.addCallback(self.createJob, spider_info, uuid)
-            d.addErrback(self.workerErrback, 'Get MySQL Account')
+            d.addErrback(self.workerErrback, 'Get MySQL Account', delivery_tag)
             return d
         LOGGER.debug('No spider_info given for uuid %s' % uuid)
-        self.chan.basic_ack(delivery_tag=delivery_tag)
         return None
     
-    def createJob(self, account_info, spider_info, uuid):
+    def createJob(self, account_info, spider_info, uuid, delivery_tag):
         job = {}
         account = account_info[0]
         function_name = spider_info[0]['type']
@@ -266,6 +267,7 @@ class WorkerServer(BaseServer):
         job['function_name'] = function_name
         job['uuid'] = uuid
         job['account'] = account
+        job['delivery_tag'] = delivery_tag
         # Save account info in memcached for up to 7 days
         d = self.memc.set(uuid, simplejson.dumps(job), 60*60*24*7)
         d.addCallback(self._createJobCallback, job)
