@@ -21,7 +21,7 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    simultaneous_jobs = 20
+    simultaneous_jobs = 25
     jobs_complete = 0
     job_queue = []
     job_queue_a = job_queue.append
@@ -139,7 +139,7 @@ class WorkerServer(BaseServer):
         self.jobsloop = task.LoopingCall(self.executeJobs)
         self.jobsloop.start(1)
         LOGGER.info('Starting dequeueing thread...')
-        deferToThread(self.dequeue)
+        self.dequeue()
     
     @inlineCallbacks
     def shutdown(self):
@@ -179,7 +179,7 @@ class WorkerServer(BaseServer):
         uuid = UUID(bytes=msg.content.body).hex
         d = self.getJob(uuid, msg.delivery_tag)
         d.addCallback(self._dequeueCallback2, msg)
-        d.addErrback(self._dequeueErrback, 'Dequeue Callback')
+        d.addErrback(self._dequeueErrback)
     
     def _dequeueCallback2(self, job, msg):
         # Load custom function.
