@@ -193,7 +193,7 @@ class SchedulerServer(BaseServer):
         if self.amqp_queue_size < 100000:
             queue_items_a = queue_items.append
             LOGGER.debug("%s:%s" % (self.heap[0][0], now))
-            while self.heap[0][0] < now:
+            while self.heap[0][0] < now and queue_items < 1000:
                 job = heappop(self.heap)
                 queue_items_a(job[1][0])
                 new_job = (now + job[1][1], job[1])

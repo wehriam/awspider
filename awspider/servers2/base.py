@@ -309,6 +309,7 @@ class BaseServer(object):
 
     def deleteReservation(self, uuid, function_name="Unknown"):
         # TODO: this should try to remove from mysql
+        LOGGER.debug('deleteReservation called for %s by %s' % (uuid, function_name))
         return True
     
     def deleteHTTPCache(self):
