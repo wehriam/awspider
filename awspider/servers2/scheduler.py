@@ -178,7 +178,6 @@ class SchedulerServer(BaseServer):
 
     @inlineCallbacks
     def queueStatusCheck(self):
-        yield self.chan.channel_open()
         yield self.chan.queue_bind(
             queue=self.amqp_queue, 
             exchange=self.amqp_exchange)
