@@ -178,6 +178,10 @@ class SchedulerServer(BaseServer):
 
     @inlineCallbacks
     def queueStatusCheck(self):
+        yield self.chan.channel_open()
+        yield self.chan.queue_bind(
+            queue=self.amqp_queue, 
+            exchange=self.amqp_exchange)
         queue_status = yield self.chan.queue_declare(
             queue=self.amqp_queue,
             passive=True)
@@ -202,13 +206,6 @@ class SchedulerServer(BaseServer):
             LOGGER.critical('AMQP queue is at or beyond max limit (%d/100000)' % self.amqp_queue_size)
         # add items to amqp
         if queue_items:
-            yield self.conn.authenticate(self.amqp_username, self.amqp_password)
-            self.chan = yield self.conn.channel(1)
-            yield self.chan.channel_open()
-            yield self.chan.queue_bind(
-                queue=self.amqp_queue, 
-                exchange=self.amqp_exchange)
-                
             LOGGER.info('Found %d new uuids, adding them to the queue' % len(queue_items))
             msgs = [Content(uuid) for uuid in queue_items]
             deferreds = [self.chan.basic_publish(exchange=self.amqp_exchange, content=msg) for msg in msgs]
