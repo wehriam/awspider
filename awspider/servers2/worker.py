@@ -151,8 +151,8 @@ class WorkerServer(BaseServer):
         # Shut things down
         LOGGER.info('Closing broker connection')
         yield self.chan.channel_close()
-        # chan0 = yield self.conn.channel(0)
-        # yield chan0.connection_close()
+        chan0 = yield self.conn.channel(0)
+        yield chan0.connection_close()
         #TODO close mysql connection
         #TODO close memcache connection
         
@@ -251,7 +251,7 @@ class WorkerServer(BaseServer):
             account_type = spider_info[0]['type'].split('/')[0]
             sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
             d = self.mysql.runQuery(sql)
-            d.addCallback(self.createJob, spider_info, uuid)
+            d.addCallback(self.createJob, spider_info, uuid, delivery_tag)
             d.addErrback(self.workerErrback, 'Get MySQL Account', delivery_tag)
             return d
         LOGGER.debug('No spider_info given for uuid %s' % uuid)

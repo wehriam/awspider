@@ -172,9 +172,9 @@ class SchedulerServer(BaseServer):
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
     
-    def enqueue(self):
-        # Defer this to a thread so we don't block on the web interface.
-        deferToThread(self._enqueue)
+    # def enqueue(self):
+    #     # Defer this to a thread so we don't block on the web interface.
+    #     deferToThread(self._enqueue)
 
     @inlineCallbacks
     def queueStatusCheck(self):
@@ -187,7 +187,7 @@ class SchedulerServer(BaseServer):
         self.amqp_queue_size = queue_status.fields[1]
         LOGGER.debug('AMQP queue size: %d' % self.amqp_queue_size)
         
-    def _enqueue(self):
+    def enqueue(self):
         now = int(time.time())
         # Compare the heap min timestamp with now().
         # If it's time for the item to be queued, pop it, update the 
@@ -215,7 +215,7 @@ class SchedulerServer(BaseServer):
         
     def _addToQueueComplete(self, data):
         LOGGER.info('Completed adding items into the queue...')
-        self.enqueueCallLater = reactor.callLater(1, self.enqueue)
+        self.enqueueCallLater = reactor.callLater(2, self.enqueue)
         
     def _addToQueueErr(self, error):
         LOGGER.error(error.printBriefTraceback)
