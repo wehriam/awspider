@@ -119,7 +119,7 @@ class WorkerServer(BaseServer):
         self.auth = yield self.conn.authenticate(
             self.amqp_username,
             self.amqp_password)
-        self.chan = yield self.conn.channel(1)
+        self.chan = yield self.conn.channel(2)
         yield self.chan.channel_open()
         yield self.chan.basic_qos(prefetch_count=self.amqp_prefetch_count)
         # Create Queue
@@ -151,8 +151,8 @@ class WorkerServer(BaseServer):
         # Shut things down
         LOGGER.info('Closing broker connection')
         yield self.chan.channel_close()
-        chan0 = yield self.conn.channel(0)
-        yield chan0.connection_close()
+        # chan0 = yield self.conn.channel(0)
+        # yield chan0.connection_close()
         #TODO close mysql connection
         #TODO close memcache connection
         
