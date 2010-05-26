@@ -308,9 +308,21 @@ class BaseServer(object):
         return self.rq.setHostMaxSimultaneousRequests(*args, **kwargs)
 
     def deleteReservation(self, uuid, function_name="Unknown"):
-        # TODO: this should try to remove from mysql
-        LOGGER.debug('deleteReservation called for %s by %s' % (uuid, function_name))
+        LOGGER.info("Deleting reservation %s, %s." % (function_name, uuid))
+        deferreds = []
+        deferreds.append(self.s3.deleteObject(self.aws_s3_storage_bucket, uuid))
+        d = DeferredList(deferreds)
+        d.addCallback(self._deleteReservationCallback, function_name, uuid)
+        d.addErrback(self._deleteReservationErrback, function_name, uuid)
+        return d
+
+    def _deleteReservationCallback(self, data, function_name, uuid):
+        LOGGER.info("Reservation %s, %s successfully deleted." % (function_name, uuid))
         return True
+
+    def _deleteReservationErrback(self, error, function_name, uuid ):
+        LOGGER.error("Error deleting reservation %s, %s.\n%s" % (function_name, uuid, error))
+        return False
     
     def deleteHTTPCache(self):
         deferreds = []
