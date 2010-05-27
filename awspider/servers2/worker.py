@@ -260,6 +260,7 @@ class WorkerServer(BaseServer):
         job = {}
         account = account_info[0]
         function_name = spider_info[0]['type']
+        job['type'] = function_name.split('/')[1]
         if self.service_mapping and self.service_mapping.has_key(function_name):
             LOGGER.debug('Remapping resource %s to %s' % (function_name, self.service_mapping[function_name]))
             function_name = self.service_mapping[function_name]
@@ -287,7 +288,10 @@ class WorkerServer(BaseServer):
                     job['account'][self.service_args_mapping[service_name][key]] = job['account'][key]
         # apply job fields to req and optional kwargs
         for arg in job['exposed_function']['required_arguments']:
-            if arg in job['account']:
+            if arg in job:
+                LOGGER.error('Using %s: %s' % (arg, job[arg]))
+                kwargs[arg] = job[arg]
+            elif arg in job['account']:
                 kwargs[arg] = job['account'][arg]
         for arg in job['exposed_function']['optional_arguments']:
             if arg in job['account']:
