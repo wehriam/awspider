@@ -132,7 +132,7 @@ class WorkerServer(BaseServer):
             queue=self.amqp_queue,
             exchange=self.amqp_exchange)
         yield self.chan.basic_consume(queue=self.amqp_queue,
-            no_ack=False,
+            no_ack=True,
             consumer_tag="awspider_consumer")
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
@@ -206,7 +206,7 @@ class WorkerServer(BaseServer):
             else:
                 # assign a temp uuid
                 uuid = UUID(bytes=msg.content.body).hex
-            self.chan.basic_ack(delivery_tag=job['delivery_tag'])
+            # self.chan.basic_ack(delivery_tag=job['delivery_tag'])
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
