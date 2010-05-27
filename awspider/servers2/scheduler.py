@@ -239,7 +239,6 @@ class SchedulerServer(BaseServer):
         return
         
     def addToHeap(self, uuid, type):
-        # TODO: add to heap if active queue < 100k
         # lookup if type is in the service_mapping, if it is
         # then rewrite type to the proper resource
         if self.service_mapping and self.service_mapping.has_key(type):

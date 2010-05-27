@@ -183,15 +183,16 @@ class WorkerServer(BaseServer):
     
     def _dequeueCallback2(self, job, msg):
         # Load custom function.
-        if job['function_name'] in self.functions:
-            job['exposed_function'] = self.functions[job['function_name']]
-            LOGGER.debug('Pulled job off of AMQP queue')
-            job['kwargs'] = self.mapKwargs(job)
-            if not 'delivery_tag' in job:
-                job['delivery_tag'] = msg.delivery_tag
-            self.job_queue_a(job)
-        else:
-            LOGGER.error("Could not find function %s." % job['function_name'])
+        if not job == None:
+            if job['function_name'] in self.functions:
+                job['exposed_function'] = self.functions[job['function_name']]
+                LOGGER.debug('Pulled job off of AMQP queue')
+                job['kwargs'] = self.mapKwargs(job)
+                if not 'delivery_tag' in job:
+                    job['delivery_tag'] = msg.delivery_tag
+                self.job_queue_a(job)
+            else:
+                LOGGER.error("Could not find function %s." % job['function_name'])
         self.pending_dequeue = False
         reactor.callLater(0, self.dequeue)
         
@@ -206,7 +207,6 @@ class WorkerServer(BaseServer):
             else:
                 # assign a temp uuid
                 uuid = UUID(bytes=msg.content.body).hex
-            # self.chan.basic_ack(delivery_tag=job['delivery_tag'])
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
@@ -218,14 +218,32 @@ class WorkerServer(BaseServer):
     def _executeJobCallback(self, data, job):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
+        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
+        # if job.has_key('delivery_tag'):
+        #             d = self.chan.basic_ack(delivery_tag=job['delivery_tag'])
+        #             d.addCallback(self._basicAckCallback)
+        #             d.addErrback(self.basicAckErrback)
         
     def workerErrback(self, error, function_name='Worker', delivery_tag=None):
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
         self.pending_dequeue = False
+        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
+        # if delivery_tag:
+        #             d = self.chan.basic_ack(delivery_tag=delivery_tag)
+        #             d.addCallback(self._basicAckCallback)
+        #             d.addErrback(self.basicAckErrback)
+        #         else:
         return error
-    
+        
+    def _basicAckCallback(self, data):
+        return
+        
+    def basicAckErrback(self, error):
+        LOGGER.error('basic_ack Error: %s' % (error))
+        return
+        
     def getJob(self, uuid, delivery_tag):
         d = self.memc.get(uuid)
         d.addCallback(self._getJobCallback, uuid, delivery_tag)
@@ -289,7 +307,6 @@ class WorkerServer(BaseServer):
         # apply job fields to req and optional kwargs
         for arg in job['exposed_function']['required_arguments']:
             if arg in job:
-                LOGGER.error('Using %s: %s' % (arg, job[arg]))
                 kwargs[arg] = job[arg]
             elif arg in job['account']:
                 kwargs[arg] = job['account'][arg]
