@@ -171,6 +171,8 @@ class SchedulerServer(BaseServer):
         yield self.chan.channel_close()
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
+        LOGGER.info('Closing MYSQL Connnection Pool')
+        yield self.mysql.close()
     
     # def enqueue(self):
     #     # Defer this to a thread so we don't block on the web interface.

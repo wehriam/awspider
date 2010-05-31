@@ -153,8 +153,8 @@ class WorkerServer(BaseServer):
         yield self.chan.channel_close()
         chan0 = yield self.conn.channel(0)
         yield chan0.connection_close()
-        #TODO close mysql connection
-        #TODO close memcache connection
+        LOGGER.info('Closing MYSQL Connnection Pool')
+        yield self.mysql.close()
         
     def dequeue(self):
         LOGGER.debug('Pending Deuque: %s / Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.pending_dequeue, self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
@@ -229,7 +229,7 @@ class WorkerServer(BaseServer):
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
         self.pending_dequeue = False
-        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
+        # FIXME see FIXME in _executeJobCallback
         # if delivery_tag:
         #             d = self.chan.basic_ack(delivery_tag=delivery_tag)
         #             d.addCallback(self._basicAckCallback)
