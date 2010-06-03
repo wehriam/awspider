@@ -13,6 +13,7 @@ from twisted.internet.threads import deferToThread
 from uuid import UUID, uuid4
 import pprint
 import simplejson
+import random
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
@@ -119,7 +120,7 @@ class WorkerServer(BaseServer):
         self.auth = yield self.conn.authenticate(
             self.amqp_username,
             self.amqp_password)
-        self.chan = yield self.conn.channel(2)
+        self.chan = yield self.conn.channel(random.randint(2, 999))
         yield self.chan.channel_open()
         yield self.chan.basic_qos(prefetch_count=self.amqp_prefetch_count)
         # Create Queue
@@ -127,6 +128,12 @@ class WorkerServer(BaseServer):
             queue=self.amqp_queue,
             durable=False,
             exclusive=False,
+            auto_delete=False)
+        # Create Exchange
+        yield self.chan.exchange_declare(
+            exchange=self.amqp_exchange, 
+            type="fanout", 
+            durable=False, 
             auto_delete=False)
         yield self.chan.queue_bind(
             queue=self.amqp_queue,
@@ -219,7 +226,8 @@ class WorkerServer(BaseServer):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
         # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
-        # if job.has_key('delivery_tag'):
+        # if job.has_key('delivery_tag') and job['delivery_tag']:
+        #             LOGGER.debug('basic_ack for delivery_tag: %s' % job['delivery_tag'])
         #             d = self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         #             d.addCallback(self._basicAckCallback)
         #             d.addErrback(self.basicAckErrback)
@@ -229,12 +237,6 @@ class WorkerServer(BaseServer):
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
         self.pending_dequeue = False
-        # FIXME see FIXME in _executeJobCallback
-        # if delivery_tag:
-        #             d = self.chan.basic_ack(delivery_tag=delivery_tag)
-        #             d.addCallback(self._basicAckCallback)
-        #             d.addErrback(self.basicAckErrback)
-        #         else:
         return error
         
     def _basicAckCallback(self, data):
