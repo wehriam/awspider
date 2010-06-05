@@ -13,7 +13,6 @@ from twisted.internet.threads import deferToThread
 from uuid import UUID, uuid4
 import pprint
 import simplejson
-import random
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
@@ -120,7 +119,7 @@ class WorkerServer(BaseServer):
         self.auth = yield self.conn.authenticate(
             self.amqp_username,
             self.amqp_password)
-        self.chan = yield self.conn.channel(random.randint(2, 999))
+        self.chan = yield self.conn.channel(2)
         yield self.chan.channel_open()
         yield self.chan.basic_qos(prefetch_count=self.amqp_prefetch_count)
         # Create Queue
