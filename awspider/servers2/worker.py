@@ -183,6 +183,8 @@ class WorkerServer(BaseServer):
         LOGGER.debug('fetched msg from queue: %s' % repr(msg))
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
+        # import pdb
+        # pdb.set_trace()
         d = self.getJob(uuid, msg.delivery_tag)
         d.addCallback(self._dequeueCallback2, msg)
         d.addErrback(self._dequeueErrback)
