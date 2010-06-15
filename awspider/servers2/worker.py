@@ -161,6 +161,11 @@ class WorkerServer(BaseServer):
         yield chan0.connection_close()
         LOGGER.info('Closing MYSQL Connnection Pool')
         yield self.mysql.close()
+    
+    @inlineCallbacks
+    def restart(self):
+        yield self.shutdown()
+        yield self._start()
         
     def dequeue(self):
         LOGGER.debug('Pending Deuque: %s / Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.pending_dequeue, self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
@@ -183,8 +188,6 @@ class WorkerServer(BaseServer):
         LOGGER.debug('fetched msg from queue: %s' % repr(msg))
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
-        # import pdb
-        # pdb.set_trace()
         d = self.getJob(uuid, msg.delivery_tag)
         d.addCallback(self._dequeueCallback2, msg)
         d.addErrback(self._dequeueErrback)
@@ -234,11 +237,16 @@ class WorkerServer(BaseServer):
         #             d.addErrback(self.basicAckErrback)
         
     def workerErrback(self, error, function_name='Worker', delivery_tag=None):
+        # FIXME "ERROR: Get Job Error: [Failure instance: Traceback (failure with no frames): <type 'exceptions.RuntimeError'>: not connected"
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
         self.pending_dequeue = False
-        return error
+        if 'not connected' in str(error):
+            LOGGER.info('Attempting to reconnect...')
+            self.restart()
+        else:
+            return error
         
     def _basicAckCallback(self, data):
         return
@@ -269,7 +277,7 @@ class WorkerServer(BaseServer):
     def getAccountMySQL(self, spider_info, uuid, delivery_tag):
         if spider_info:
             account_type = spider_info[0]['type'].split('/')[0]
-            sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type, spider_info[0]['account_id'])
+            sql = "SELECT * FROM content_%saccount WHERE account_id = %d" % (account_type.lower(), spider_info[0]['account_id'])
             d = self.mysql.runQuery(sql)
             d.addCallback(self.createJob, spider_info, uuid, delivery_tag)
             d.addErrback(self.workerErrback, 'Get MySQL Account', delivery_tag)
