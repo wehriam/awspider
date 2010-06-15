@@ -186,8 +186,7 @@ class BaseServer(object):
                 function_name,
                 uuid,
                 error)
-            # FIXME this shouldn't be commented out, see why this is being called and handle appropriately.
-            # LOGGER.error(message)
+            LOGGER.debug(message)
             return
         except:
             pass
