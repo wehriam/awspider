@@ -163,9 +163,8 @@ class WorkerServer(BaseServer):
         yield self.mysql.close()
     
     @inlineCallbacks
-    def restart(self):
-        yield self.shutdown()
-        yield self._start()
+    def reconnectMemcache(self):
+        self.memc = yield self.memc_ClientCreator.connectTCP(self.memcached_host, self.memcached_port)
         
     def dequeue(self):
         LOGGER.debug('Pending Deuque: %s / Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.pending_dequeue, self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
@@ -196,10 +195,11 @@ class WorkerServer(BaseServer):
         # Load custom function.
         if not job == None:
             if job['function_name'] in self.functions:
+                LOGGER.debug('Successfully pulled job off of AMQP queue')
                 job['exposed_function'] = self.functions[job['function_name']]
-                LOGGER.debug('Pulled job off of AMQP queue')
-                job['kwargs'] = self.mapKwargs(job)
-                if not 'delivery_tag' in job:
+                if not job.has_key('kwargs'):
+                    job['kwargs'] = self.mapKwargs(job)
+                if not job.has_key('delivery_tag'):
                     job['delivery_tag'] = msg.delivery_tag
                 self.job_queue_a(job)
             else:
@@ -229,24 +229,42 @@ class WorkerServer(BaseServer):
     def _executeJobCallback(self, data, job):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
+        if job['uuid'] in self.reservation_fast_caches:
+            LOGGER.debug("Set reservation fast cache for %s, %s in memcache." % (job['function_name'], job['uuid']))
+            job['kwargs']['reservation_fast_cache'] = self.reservation_fast_caches[job['uuid']]
+            del(self.reservation_fast_caches[job['uuid']])
         # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
         # if job.has_key('delivery_tag') and job['delivery_tag']:
         #             LOGGER.debug('basic_ack for delivery_tag: %s' % job['delivery_tag'])
         #             d = self.chan.basic_ack(delivery_tag=job['delivery_tag'])
         #             d.addCallback(self._basicAckCallback)
         #             d.addErrback(self.basicAckErrback)
+        # Save account info in memcached for up to 7 days
+        if job.has_key('exposed_function'):
+            del(job['exposed_function'])
+        d = self.memc.set(job['uuid'], simplejson.dumps(job), 60*60*24*7)
+        d.addCallback(self._executeJobCallback2)
+        d.addErrback(self.workerErrback, 'Execute Jobs', job['delivery_tag'])
+        return d
+        
+    def _executeJobCallback2(self, data):
+        return
         
     def workerErrback(self, error, function_name='Worker', delivery_tag=None):
-        # FIXME "ERROR: Get Job Error: [Failure instance: Traceback (failure with no frames): <type 'exceptions.RuntimeError'>: not connected"
         LOGGER.error('%s Error: %s' % (function_name, str(error)))
         LOGGER.debug('Queued Jobs: %d / Active Jobs: %d' % (len(self.job_queue), len(self.active_jobs)))
         LOGGER.debug('Active Jobs List: %s' % repr(self.active_jobs))
         self.pending_dequeue = False
         if 'not connected' in str(error):
-            LOGGER.info('Attempting to reconnect...')
-            self.restart()
+            LOGGER.info('Attempting to reconnect to memcached...')
+            d = self.reconnectMemcache()
+            d.addCallback(self._reconnectMemcacheCallback)
+            return d
         else:
             return error
+            
+    def _reconnectMemcacheCallback(self, data):
+        return
         
     def _basicAckCallback(self, data):
         return
@@ -297,16 +315,8 @@ class WorkerServer(BaseServer):
         job['uuid'] = uuid
         job['account'] = account
         job['delivery_tag'] = delivery_tag
-        # Save account info in memcached for up to 7 days
-        d = self.memc.set(uuid, simplejson.dumps(job), 60*60*24*7)
-        d.addCallback(self._createJobCallback, job)
-        d.addErrback(self.workerErrback, 'Create Job')
-        return d
-    
-    def _createJobCallback(self, memc, job):
         return job
     
-    # TODO: map before putting into memcache
     def mapKwargs(self, job):
         kwargs = {}
         service_name = job['function_name'].split('/')[0]
