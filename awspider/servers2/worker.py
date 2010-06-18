@@ -204,7 +204,7 @@ class WorkerServer(BaseServer):
     
     def _dequeueCallback3(self, job, msg):
         # Load custom function.
-        if not job == None:
+        if job is not None:
             if job['function_name'] in self.functions:
                 LOGGER.debug('Successfully pulled job off of AMQP queue')
                 job['exposed_function'] = self.functions[job['function_name']]
@@ -212,12 +212,22 @@ class WorkerServer(BaseServer):
                     job['kwargs'] = self.mapKwargs(job)
                 if not job.has_key('delivery_tag'):
                     job['delivery_tag'] = msg.delivery_tag
+                # If function asked for fast_cache, try to fetch it from memcache
+                # while it's queued. Go ahead and add it to the queue in the meantime
+                # to speed things up.
+                job["reservation_fast_cache"] = None
+                if self.functions[job['function_name']]["check_reservation_fast_cache"]:
+                    d = self.getReservationFastCache(job['uuid'])
+                    d.addCallback(self._dequeueCallback4, job)
                 self.job_queue_a(job)
             else:
                 LOGGER.error("Could not find function %s." % job['function_name'])
         self.pending_dequeue = False
         reactor.callLater(0, self.dequeue)
-        
+    
+    def _dequeueCallback4(self, data, job):
+        job["reservation_fast_cache"] = data
+    
     def executeJobs(self):
         while len(self.job_queue) > 0 and len(self.active_jobs) < self.simultaneous_jobs:
             job = self.job_queue.pop(0)
@@ -232,7 +242,8 @@ class WorkerServer(BaseServer):
             d = self.callExposedFunction(
                 exposed_function["function"], 
                 kwargs, 
-                function_name, 
+                function_name,
+                reservation_fast_cache=job["reservation_fast_cache"],
                 uuid=uuid)
             d.addCallback(self._executeJobCallback, job)
             d.addErrback(self.workerErrback, 'Execute Jobs', job['delivery_tag'])
@@ -360,3 +371,33 @@ class WorkerServer(BaseServer):
         message = "Could not get network address."
         LOGGER.error(message)
         raise Exception(message)
+    
+    def getReservationFastCache(self, uuid):
+        d = self.memc.get("%s_fc" % uuid)
+        d.addCallback(self._getReservationFastCacheCallback, uuid)
+        d.addErrback(self._getReservationFastCacheErrback, uuid)
+        return d
+        
+    def _getReservationFastCacheCallback(self, data, uuid):
+        LOGGER.debug("Successfully got Fast Cache for %s" % uuid)
+        return data
+    
+    def _getReservationFastCacheErrback(self, error, uuid):
+        LOGGER.debug("Could not get Fast Cache for %s" % uuid)
+        return None
+    
+    def setReservationFastCache(self, uuid, data):
+        if not isinstance(data, str):
+            raise Exception("ReservationFastCache must be a string.")
+        if uuid is None:
+            return None
+        d = self.memc.set("%s_fc" % uuid, data, 60*60*24*7)
+        d.addCallback(self._setReservationFastCacheCallback, uuid)
+        d.addErrback(self._setReservationFastCacheErrback)
+    
+    def _setReservationFastCacheCallback(self, data, uuid):
+        LOGGER.debug("Successfully set Fast Cache for %s" % uuid)
+        
+    def _setReservationFastCacheErrback(self, error):
+        LOGGER.error(str(error))
+        
