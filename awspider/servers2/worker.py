@@ -138,7 +138,7 @@ class WorkerServer(BaseServer):
             queue=self.amqp_queue,
             exchange=self.amqp_exchange)
         yield self.chan.basic_consume(queue=self.amqp_queue,
-            no_ack=True,
+            no_ack=False,
             consumer_tag="awspider_consumer")
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
@@ -184,14 +184,25 @@ class WorkerServer(BaseServer):
         return error
         
     def _dequeueCallback(self, msg):
+        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
+        if msg.delivery_tag:
+            LOGGER.debug('basic_ack for delivery_tag: %s' % msg.delivery_tag)
+            d = self.chan.basic_ack(msg.delivery_tag)
+            d.addCallback(self._dequeueCallback2, msg)
+            d.addErrback(self.basicAckErrback)
+            return d
+        else:
+            self.dequeueCallback2(data=True, msg=msg)
+        
+    def _dequeueCallback2(self, data, msg):
         LOGGER.debug('fetched msg from queue: %s' % repr(msg))
         # Get the hex version of the UUID from byte string we were sent
         uuid = UUID(bytes=msg.content.body).hex
         d = self.getJob(uuid, msg.delivery_tag)
-        d.addCallback(self._dequeueCallback2, msg)
+        d.addCallback(self._dequeueCallback3, msg)
         d.addErrback(self._dequeueErrback)
     
-    def _dequeueCallback2(self, job, msg):
+    def _dequeueCallback3(self, job, msg):
         # Load custom function.
         if not job == None:
             if job['function_name'] in self.functions:
@@ -233,12 +244,6 @@ class WorkerServer(BaseServer):
             LOGGER.debug("Set reservation fast cache for %s, %s in memcache." % (job['function_name'], job['uuid']))
             job['kwargs']['reservation_fast_cache'] = self.reservation_fast_caches[job['uuid']]
             del(self.reservation_fast_caches[job['uuid']])
-        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
-        # if job.has_key('delivery_tag') and job['delivery_tag']:
-        #             LOGGER.debug('basic_ack for delivery_tag: %s' % job['delivery_tag'])
-        #             d = self.chan.basic_ack(delivery_tag=job['delivery_tag'])
-        #             d.addCallback(self._basicAckCallback)
-        #             d.addErrback(self.basicAckErrback)
         # Save account info in memcached for up to 7 days
         if job.has_key('exposed_function'):
             del(job['exposed_function'])
