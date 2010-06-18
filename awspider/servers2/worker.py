@@ -379,11 +379,16 @@ class WorkerServer(BaseServer):
         return d
         
     def _getReservationFastCacheCallback(self, data, uuid):
-        LOGGER.debug("Successfully got Fast Cache for %s" % uuid)
-        return data
+        flags, value = data
+        if value:
+            LOGGER.debug("Successfully got Fast Cache for %s" % uuid)
+            return value
+        else:
+            LOGGER.debug("Could not get Fast Cache (2) for %s" % uuid)
+            return None
     
     def _getReservationFastCacheErrback(self, error, uuid):
-        LOGGER.debug("Could not get Fast Cache for %s" % uuid)
+        LOGGER.debug("Could not get Fast Cache (1) for %s" % uuid)
         return None
     
     def setReservationFastCache(self, uuid, data):
