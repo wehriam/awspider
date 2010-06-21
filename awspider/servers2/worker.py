@@ -184,7 +184,6 @@ class WorkerServer(BaseServer):
         return error
         
     def _dequeueCallback(self, msg):
-        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
         if msg.delivery_tag:
             LOGGER.debug('basic_ack for delivery_tag: %s' % msg.delivery_tag)
             d = self.chan.basic_ack(msg.delivery_tag)
@@ -251,6 +250,9 @@ class WorkerServer(BaseServer):
     def _executeJobCallback(self, data, job):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
+        # Save account info in memcached for up to 7 days
+        if job.has_key('exposed_function'):
+            del(job['exposed_function'])
         d = self.memc.set(job['uuid'], simplejson.dumps(job), 60*60*24*7)
         d.addCallback(self._executeJobCallback2)
         d.addErrback(self.workerErrback, 'Execute Jobs', job['delivery_tag'])
