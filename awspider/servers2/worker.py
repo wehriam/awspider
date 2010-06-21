@@ -47,7 +47,7 @@ class WorkerServer(BaseServer):
             service_mapping=None,
             service_args_mapping=None,
             amqp_port=5672,
-            amqp_prefetch_count=2000,
+            amqp_prefetch_count=500,
             mysql_port=3306,
             memcached_port=11211,
             max_simultaneous_requests=100,

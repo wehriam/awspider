@@ -13,5 +13,5 @@ def createClient(amqp_host, amqp_vhost, amqp_port=5672):
         delegate=amqp_delegate,
         vhost=amqp_vhost,
         spec=amqp_spec,
-        heartbeat=10).connectTCP(amqp_host, amqp_port)
+        heartbeat=30).connectTCP(amqp_host, amqp_port)
     return client
