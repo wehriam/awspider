@@ -251,13 +251,6 @@ class WorkerServer(BaseServer):
     def _executeJobCallback(self, data, job):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
-        if job['uuid'] in self.reservation_fast_caches:
-            LOGGER.debug("Set reservation fast cache for %s, %s in memcache." % (job['function_name'], job['uuid']))
-            job['kwargs']['reservation_fast_cache'] = self.reservation_fast_caches[job['uuid']]
-            del(self.reservation_fast_caches[job['uuid']])
-        # Save account info in memcached for up to 7 days
-        if job.has_key('exposed_function'):
-            del(job['exposed_function'])
         d = self.memc.set(job['uuid'], simplejson.dumps(job), 60*60*24*7)
         d.addCallback(self._executeJobCallback2)
         d.addErrback(self.workerErrback, 'Execute Jobs', job['delivery_tag'])
