@@ -21,7 +21,7 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    simultaneous_jobs = 40
+    simultaneous_jobs = 50
     jobs_complete = 0
     job_queue = []
     job_queue_a = job_queue.append
@@ -143,7 +143,7 @@ class WorkerServer(BaseServer):
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
         self.jobsloop = task.LoopingCall(self.executeJobs)
-        self.jobsloop.start(1)
+        self.jobsloop.start(0.2)
         LOGGER.info('Starting dequeueing thread...')
         self.dequeue()
     
