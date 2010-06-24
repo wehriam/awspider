@@ -47,7 +47,7 @@ class WorkerServer(BaseServer):
             service_mapping=None,
             service_args_mapping=None,
             amqp_port=5672,
-            amqp_prefetch_count=1000,
+            amqp_prefetch_count=2000,
             mysql_port=3306,
             memcached_port=11211,
             max_simultaneous_requests=100,
@@ -184,7 +184,6 @@ class WorkerServer(BaseServer):
         return error
         
     def _dequeueCallback(self, msg):
-        # FIXME basic_ack giving error "txamqp.client.Closed: Method(name=close, id=60) (503, 'COMMAND_INVALID - unknown delivery tag 15421', 60, 80) content = None"
         if msg.delivery_tag:
             LOGGER.debug('basic_ack for delivery_tag: %s' % msg.delivery_tag)
             d = self.chan.basic_ack(msg.delivery_tag)
@@ -251,10 +250,6 @@ class WorkerServer(BaseServer):
     def _executeJobCallback(self, data, job):
         self.jobs_complete += 1
         LOGGER.debug('Completed Jobs: %d / Queued Jobs: %d / Active Jobs: %d' % (self.jobs_complete, len(self.job_queue), len(self.active_jobs)))
-        if job['uuid'] in self.reservation_fast_caches:
-            LOGGER.debug("Set reservation fast cache for %s, %s in memcache." % (job['function_name'], job['uuid']))
-            job['kwargs']['reservation_fast_cache'] = self.reservation_fast_caches[job['uuid']]
-            del(self.reservation_fast_caches[job['uuid']])
         # Save account info in memcached for up to 7 days
         if job.has_key('exposed_function'):
             del(job['exposed_function'])
