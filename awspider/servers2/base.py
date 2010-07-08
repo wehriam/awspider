@@ -1,5 +1,6 @@
 import cPickle
 import hashlib
+import urllib
 import inspect
 import logging
 import logging.handlers
@@ -178,7 +179,7 @@ class BaseServer(object):
                 del self.active_jobs[uuid]
         try:
             error.raiseException()
-        except DeleteReservationException, e:
+        except DeleteReservationException:
             if uuid is not None:
                 self.deleteReservation(uuid)
             message = """Error with %s, %s.\n%s            
@@ -309,7 +310,11 @@ class BaseServer(object):
 
     def deleteReservation(self, uuid, function_name="Unknown"):
         LOGGER.info("Deleting reservation %s, %s." % (function_name, uuid))
+        parameters = {'uuid': uuid}
+        query_string = urllib.urlencode(parameters)
+        url = 'http://%s:%s/function/schedulerserver/remoteremovefromheap?%s' % (self.scheduler_server, self.schedulerserver_port, query_string)
         deferreds = []
+        deferreds.append(self.getPage(url=url))
         deferreds.append(self.s3.deleteObject(self.aws_s3_storage_bucket, uuid))
         d = DeferredList(deferreds)
         d.addCallback(self._deleteReservationCallback, function_name, uuid)
@@ -358,7 +363,6 @@ class BaseServer(object):
         data = {
             "load_avg":[str(Decimal(str(x), 2)) for x in os.getloadavg()],
             "running_time":running_time,
-            "cost":cost,
             "active_requests_by_host":active_requests_by_host,
             "pending_requests_by_host":pending_requests_by_host,
             "active_requests":self.rq.getActive(),

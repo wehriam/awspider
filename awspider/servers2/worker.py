@@ -21,7 +21,7 @@ class WorkerServer(BaseServer):
     public_ip = None
     local_ip = None
     network_information = {}
-    simultaneous_jobs = 40
+    simultaneous_jobs = 50
     jobs_complete = 0
     job_queue = []
     job_queue_a = job_queue.append
@@ -47,7 +47,7 @@ class WorkerServer(BaseServer):
             service_mapping=None,
             service_args_mapping=None,
             amqp_port=5672,
-            amqp_prefetch_count=500,
+            amqp_prefetch_count=200,
             mysql_port=3306,
             memcached_port=11211,
             max_simultaneous_requests=100,
@@ -143,7 +143,7 @@ class WorkerServer(BaseServer):
         self.queue = yield self.conn.queue("awspider_consumer")
         yield BaseServer.start(self)
         self.jobsloop = task.LoopingCall(self.executeJobs)
-        self.jobsloop.start(1)
+        self.jobsloop.start(0.2)
         LOGGER.info('Starting dequeueing thread...')
         self.dequeue()
     
