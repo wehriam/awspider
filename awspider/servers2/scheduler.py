@@ -85,13 +85,28 @@ class SchedulerServer(BaseServer):
             interval=0,
             name=None,
             expose=True)
+        self.exposed_functions.append(function_name)
         er = ExposedResource(self, function_name)
+        function_name_parts = function_name.split("/")
+        if len(function_name_parts) > 1:
+            if function_name_parts[0] in self.exposed_function_resources:
+                r = self.exposed_function_resources[function_name_parts[0]]
+            else:
+                r = Resource()
+                self.exposed_function_resources[function_name_parts[0]] = r
+            self.function_resource.putChild(function_name_parts[0], r)
+            r.putChild(function_name_parts[1], er)
+        else:
+            self.function_resource.putChild(function_name_parts[0], er)
+        LOGGER.info("Function %s is now available via the HTTP interface."
+            % function_name)
         function_name = BaseServer.makeCallable(
             self,
             self.remoteRemoveFromHeap,
             interval=0,
             name=None,
             expose=True)
+        self.exposed_functions.append(function_name)
         er = ExposedResource(self, function_name)
         function_name_parts = function_name.split("/")
         if len(function_name_parts) > 1:

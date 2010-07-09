@@ -220,7 +220,7 @@ class BaseServer(object):
                                     scheduler_hostnames_a(instance.private_dns_name)
                 if scheduler_hostnames:
                     self.scheduler_server = scheduler_hostnames[0]
-            else:
+            if not self.scheduler_server:
                 self.scheduler_server = "0.0.0.0"
             LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
         except Exception, e:
