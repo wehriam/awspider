@@ -10,12 +10,10 @@ from .base import BaseServer, LOGGER
 from ..resources import InterfaceResource, ExposedResource
 from ..aws import sdb_now
 from ..evaluateboolean import evaluateBoolean
-from boto.ec2.connection import EC2Connection
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
 class InterfaceServer(BaseServer):
-    scheduler_server = None
     exposed_functions = []
     exposed_function_resources = {}
     name = "AWSpider Interface Server UUID: %s" % str(uuid4())
@@ -59,7 +57,6 @@ class InterfaceServer(BaseServer):
             port=port)
         
     def start(self):
-        deferToThread(self.setSchedulerServer)
         reactor.callWhenRunning(self._start)
         return self.start_deferred
 
@@ -91,24 +88,6 @@ class InterfaceServer(BaseServer):
 
     def _shutdownCallback(self, data):
         return BaseServer.shutdown(self)
-        
-    def setSchedulerServer(self):
-        LOGGER.info('Locating scheduler server for security group: %s' % self.scheduler_server_group)
-        if self.scheduler_server_group:
-            conn = EC2Connection(self.aws_access_key_id, self.aws_secret_access_key)
-            scheduler_hostnames = []
-            scheduler_hostnames_a = scheduler_hostnames.append
-            for reservation in conn.get_all_instances():
-                for reservation_group in reservation.groups:
-                    if reservation_group.id == self.scheduler_server_group:
-                        for instance in reservation.instances:
-                            if instance.state == "running":
-                                scheduler_hostnames_a(instance.private_dns_name)
-            if scheduler_hostnames:
-                self.scheduler_server = scheduler_hostnames[0]
-        else:
-            self.scheduler_server = "0.0.0.0"
-        LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
     
     def makeCallable(self, func, interval=0, name=None, expose=False):
         function_name = BaseServer.makeCallable(

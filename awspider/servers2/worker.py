@@ -44,6 +44,8 @@ class WorkerServer(BaseServer):
             amqp_queue=None,
             amqp_exchange=None,
             memcached_host=None,
+            scheduler_server_group='flavors_spider_production',
+            schedulerserver_port=5004,
             service_mapping=None,
             service_args_mapping=None,
             amqp_port=5672,
@@ -73,6 +75,9 @@ class WorkerServer(BaseServer):
         self.memcached_port = memcached_port
         self.memc_ClientCreator = protocol.ClientCreator(
             reactor, MemCacheProtocol)
+        #Schedule Server
+        self.scheduler_server_group=scheduler_server_group
+        self.schedulerserver_port=schedulerserver_port
         # Resource Mappings
         self.service_mapping = service_mapping
         self.service_args_mapping = service_args_mapping

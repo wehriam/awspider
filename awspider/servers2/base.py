@@ -1,5 +1,4 @@
 import cPickle
-import hashlib
 import urllib
 import inspect
 import logging
@@ -16,6 +15,8 @@ from ..exceptions import DeleteReservationException
 from ..pagegetter import PageGetter
 from ..requestqueuer import RequestQueuer
 import pprint
+from boto.ec2.connection import EC2Connection
+
 
 PRETTYPRINTER = pprint.PrettyPrinter(indent=4)
 
@@ -26,6 +27,7 @@ class ReservationCachingException(Exception):
 
 class BaseServer(object):
 
+    scheduler_server = None
     logging_handler = None
     shutdown_trigger_id = None
     uuid = uuid4().hex
@@ -111,7 +113,9 @@ class BaseServer(object):
             
     def _baseStart(self):
         LOGGER.critical("Checking S3 setup.")
-        deferreds = []           
+        deferreds = []
+        if self.scheduler_server is None:
+            deferreds.append(deferToThread(self.setSchedulerServer))
         if self.aws_s3_http_cache_bucket is not None:
             self._testAWSCredentials()
             deferreds.append(
@@ -174,9 +178,8 @@ class BaseServer(object):
         return d
         
     def _callExposedFunctionErrback(self, error, function_name, uuid):
-        if uuid is not None:
-            if uuid in self.active_jobs:
-                del self.active_jobs[uuid]
+        if uuid is not None and uuid in self.active_jobs:
+            del self.active_jobs[uuid]
         try:
             error.raiseException()
         except DeleteReservationException:
@@ -199,6 +202,24 @@ class BaseServer(object):
                 uuid,
                 error))
         return error
+        
+    def setSchedulerServer(self):
+        LOGGER.info('Locating scheduler server for security group: %s' % self.scheduler_server_group)
+        if self.scheduler_server_group:
+            conn = EC2Connection(self.aws_access_key_id, self.aws_secret_access_key)
+            scheduler_hostnames = []
+            scheduler_hostnames_a = scheduler_hostnames.append
+            for reservation in conn.get_all_instances():
+                for reservation_group in reservation.groups:
+                    if reservation_group.id == self.scheduler_server_group:
+                        for instance in reservation.instances:
+                            if instance.state == "running":
+                                scheduler_hostnames_a(instance.private_dns_name)
+            if scheduler_hostnames:
+                self.scheduler_server = scheduler_hostnames[0]
+        else:
+            self.scheduler_server = "0.0.0.0"
+        LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
 
     def _callExposedFunctionCallback(self, data, function_name, uuid):
         LOGGER.debug("Function %s returned successfully." % (function_name))
@@ -225,13 +246,15 @@ class BaseServer(object):
         return data
 
     def _exposedFunctionErrback2(self, error, data, function_name, uuid):
-        del self.active_jobs[uuid]
+        if uuid in self.active_jobs:
+            del self.active_jobs[uuid]
         LOGGER.error("Could not put results of %s, %s on S3.\n%s" % (function_name, uuid, error))
         return data
         
     def _exposedFunctionCallback2(self, s3_callback_data, data, uuid):
-        del self.active_jobs[uuid]
-        return data    
+        if uuid in self.active_jobs:
+            del self.active_jobs[uuid]
+        return data
         
     def expose(self, *args, **kwargs):
         return self.makeCallable(expose=True, *args, **kwargs)
