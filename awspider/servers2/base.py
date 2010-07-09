@@ -46,6 +46,7 @@ class BaseServer(object):
                  aws_secret_access_key=None, 
                  aws_s3_http_cache_bucket=None, 
                  aws_s3_storage_bucket=None,
+                 scheduler_server_group=None,
                  max_simultaneous_requests=100,
                  max_requests_per_host_per_second=0,
                  max_simultaneous_requests_per_host=0,
@@ -68,6 +69,7 @@ class BaseServer(object):
             self.aws_access_key_id, 
             self.aws_secret_access_key, 
             rq=self.rq)
+        self.scheduler_server_group=scheduler_server_group,
         self.pg = PageGetter(
             self.s3, 
             self.aws_s3_http_cache_bucket, 
@@ -204,22 +206,25 @@ class BaseServer(object):
         return error
         
     def setSchedulerServer(self):
-        LOGGER.info('Locating scheduler server for security group: %s' % self.scheduler_server_group)
-        if self.scheduler_server_group:
-            conn = EC2Connection(self.aws_access_key_id, self.aws_secret_access_key)
-            scheduler_hostnames = []
-            scheduler_hostnames_a = scheduler_hostnames.append
-            for reservation in conn.get_all_instances():
-                for reservation_group in reservation.groups:
-                    if reservation_group.id == self.scheduler_server_group:
-                        for instance in reservation.instances:
-                            if instance.state == "running":
-                                scheduler_hostnames_a(instance.private_dns_name)
-            if scheduler_hostnames:
-                self.scheduler_server = scheduler_hostnames[0]
-        else:
-            self.scheduler_server = "0.0.0.0"
-        LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
+        try:
+            LOGGER.info('Locating scheduler server for security group: %s' % self.scheduler_server_group)
+            if self.scheduler_server_group:
+                conn = EC2Connection(self.aws_access_key_id, self.aws_secret_access_key)
+                scheduler_hostnames = []
+                scheduler_hostnames_a = scheduler_hostnames.append
+                for reservation in conn.get_all_instances():
+                    for reservation_group in reservation.groups:
+                        if reservation_group.id == self.scheduler_server_group:
+                            for instance in reservation.instances:
+                                if instance.state == "running":
+                                    scheduler_hostnames_a(instance.private_dns_name)
+                if scheduler_hostnames:
+                    self.scheduler_server = scheduler_hostnames[0]
+            else:
+                self.scheduler_server = "0.0.0.0"
+            LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
+        except Exception, e:
+            LOGGER.error('setSchedulerServer Error: %s' % e)
 
     def _callExposedFunctionCallback(self, data, function_name, uuid):
         LOGGER.debug("Function %s returned successfully." % (function_name))

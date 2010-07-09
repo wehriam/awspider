@@ -100,6 +100,7 @@ class WorkerServer(BaseServer):
             aws_secret_access_key=aws_secret_access_key,
             aws_s3_http_cache_bucket=aws_s3_http_cache_bucket,
             aws_s3_storage_bucket=aws_s3_storage_bucket,
+            scheduler_server_group=scheduler_server_group,
             max_simultaneous_requests=max_simultaneous_requests,
             max_requests_per_host_per_second=max_requests_per_host_per_second,
             max_simultaneous_requests_per_host=max_simultaneous_requests_per_host,
