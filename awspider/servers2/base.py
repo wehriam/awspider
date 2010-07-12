@@ -208,7 +208,7 @@ class BaseServer(object):
     def setSchedulerServer(self):
         try:
             LOGGER.info('Locating scheduler server for security group: %s' % self.scheduler_server_group)
-            if self.scheduler_server_group:
+            if self.scheduler_server_group and self.aws_access_key_id and self.aws_secret_access_key:
                 conn = EC2Connection(self.aws_access_key_id, self.aws_secret_access_key)
                 scheduler_hostnames = []
                 scheduler_hostnames_a = scheduler_hostnames.append
