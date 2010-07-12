@@ -225,7 +225,6 @@ class SchedulerServer(BaseServer):
             queue_items_a = queue_items.append
             LOGGER.debug("%s:%s" % (self.heap[0][0], now))
             while self.heap[0][0] < now and len(queue_items) < 1000:
-                import pdb;pdb.set_trace()
                 job = heappop(self.heap)
                 uuid = UUID(bytes=job[1][0])
                 if not uuid.hex in self.unscheduled_items:
