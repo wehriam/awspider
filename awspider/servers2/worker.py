@@ -197,7 +197,7 @@ class WorkerServer(BaseServer):
             d.addErrback(self.basicAckErrback)
             return d
         else:
-            self.dequeueCallback2(data=True, msg=msg)
+            self._dequeueCallback2(data=True, msg=msg)
         
     def _dequeueCallback2(self, data, msg):
         LOGGER.debug('fetched msg from queue: %s' % repr(msg))
