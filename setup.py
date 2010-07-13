@@ -4,7 +4,7 @@ setup(
 
     name = "AWSpider",
 
-    version = "0.3.2.9",
+    version = "0.3.2.10",
 
     packages = find_packages(),
 
