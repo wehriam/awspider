@@ -69,7 +69,7 @@ class BaseServer(object):
             self.aws_access_key_id, 
             self.aws_secret_access_key, 
             rq=self.rq)
-        self.scheduler_server_group=scheduler_server_group,
+        self.scheduler_server_group=scheduler_server_group
         self.pg = PageGetter(
             self.s3, 
             self.aws_s3_http_cache_bucket, 
@@ -221,6 +221,7 @@ class BaseServer(object):
                 if scheduler_hostnames:
                     self.scheduler_server = scheduler_hostnames[0]
             if not self.scheduler_server:
+                LOGGER.error('No scheduler server found, using 0.0.0.0')
                 self.scheduler_server = "0.0.0.0"
             LOGGER.debug('Scheduler Server found at %s' % self.scheduler_server)
         except Exception, e:
